@@ -1,0 +1,618 @@
+"""
+╔══════════════════════════════════════════════════════════════════╗
+║         LITTLE HOTELIER → LIMPATEX  — Sincronizador            ║
+║                      by Limpatex / Daniel                       ║
+╚══════════════════════════════════════════════════════════════════╝
+
+DEPENDENCIAS:
+  pip install requests python-dotenv beautifulsoup4 lxml
+
+CONFIGURACIÓN (.env):
+  LH_SESSION_TOKEN=<copia de tu cookie lh_session_token>
+  LH_PROPERTY_UUID=8d0c221e-3a40-4eda-8c15-deb2450cd307
+  LH_REGION=emea
+  APP_URL=https://gestionlimpatex.vercel.app
+  APP_API_KEY=<tu api key si la app lo requiere>
+
+CÓMO OBTENER LH_SESSION_TOKEN (una sola vez, válido 20 años):
+  1. Inicia sesión en platform.littlehotelier.com
+  2. F12 → Application → Cookies → platform.littlehotelier.com
+  3. Copia el valor de la cookie "lh_session_token"
+  4. Pégalo en el .env
+
+USO:
+  python little_hotelier_sync.py           # ejecución única
+  python little_hotelier_sync.py --debug   # ver datos sin enviar
+  python little_hotelier_sync.py --loop    # bucle cada hora
+"""
+
+import os
+import json
+import re
+import time
+import logging
+from datetime import datetime, timedelta, timezone
+
+import requests
+from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# ─────────────────────────────────────────────────────────────────
+# CONFIGURACIÓN
+# ─────────────────────────────────────────────────────────────────
+LH_SESSION_TOKEN = os.getenv("LH_SESSION_TOKEN", "")
+LH_EMAIL         = os.getenv("LH_EMAIL", "")
+LH_PASSWORD      = os.getenv("LH_PASSWORD", "")
+LH_PROPERTY_UUID = os.getenv("LH_PROPERTY_UUID", "8d0c221e-3a40-4eda-8c15-deb2450cd307")
+LH_REGION        = os.getenv("LH_REGION", "emea")
+LH_BASE_URL      = "https://platform.littlehotelier.com"
+ENV_PATH         = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+
+APP_URL     = os.getenv("APP_URL", "https://gestionlimpatex.vercel.app")
+APP_API_KEY = os.getenv("APP_API_KEY", "")
+
+DAYS_BACK      = 7      # días hacia atrás (reservas ya alojadas)
+DAYS_AHEAD     = 30     # días hacia adelante
+LOOP_INTERVAL  = 3600   # segundos
+
+# ─────────────────────────────────────────────────────────────────
+# LOGGING
+# ─────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("sync_log.txt", encoding="utf-8"),
+    ],
+)
+log = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────────────────────────
+# CLIENTE LITTLE HOTELIER
+# ─────────────────────────────────────────────────────────────────
+class LittleHotelierClient:
+    """
+    Se autentica con la cookie lh_session_token (válida 20 años)
+    y descarga la página HTML de reservas de platform.littlehotelier.com.
+    """
+
+    RESERVATIONS_URL = (
+        "{base}/frontdesk/{region}/{property_uuid}/reservations"
+    )
+
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "es-ES,es;q=0.9",
+            "Referer":         LH_BASE_URL,
+        })
+        if LH_SESSION_TOKEN:
+            self.session.cookies.set(
+                "lh_session_token", LH_SESSION_TOKEN,
+                domain="platform.littlehotelier.com"
+            )
+
+    def get_reservations(self, date_from: str, date_to: str) -> list[dict]:
+        """
+        Descarga y parsea la página HTML de reservas.
+
+        Args:
+            date_from:  "YYYY-MM-DD"
+            date_to:    "YYYY-MM-DD"
+
+        Returns:
+            Lista de reservas normalizadas como dicts.
+        """
+        url = self.RESERVATIONS_URL.format(
+            base=LH_BASE_URL,
+            region=LH_REGION,
+            property_uuid=LH_PROPERTY_UUID,
+        )
+
+        params = {
+            "utf8": "✓",
+            "reservation_filter[date_type]":    "CheckIn",
+            "reservation_filter[status]":       "",          # vacío = todos los estados
+            "reservation_filter[date_from]":    date_from,
+            "reservation_filter[date_to]":      date_to,
+            "reservation_filter[date_from_display]": _fmt_display(date_from),
+            "reservation_filter[date_to_display]":   _fmt_display(date_to),
+            "reservation_filter[guest_last_name]":       "",
+            "reservation_filter[booking_reference_id]":  "",
+            "reservation_filter[invoice_number]":        "",
+            "reservation_filter[channel_id]":            "",
+            "button": "",
+        }
+
+        log.info(f"📥  Obteniendo reservas {date_from} → {date_to} ...")
+        try:
+            resp = self.session.get(url, params=params, timeout=30)
+        except requests.RequestException as e:
+            log.error(f"❌  Error de red: {e}")
+            return []
+
+        if resp.status_code == 401 or "authx.siteminder.com" in resp.url:
+            log.warning("⚠️  Sesión expirada — intentando login automático...")
+            if self._auto_login():
+                # Reintentar con la nueva sesión
+                try:
+                    resp = self.session.get(url, params=params, timeout=30)
+                except requests.RequestException as e:
+                    log.error(f"❌  Error tras relogin: {e}")
+                    return []
+            else:
+                log.error("❌  No se pudo renovar la sesión. Comprueba LH_EMAIL y LH_PASSWORD en .env")
+                return []
+
+        if resp.status_code != 200:
+            log.error(f"❌  HTTP {resp.status_code} al obtener reservas")
+            return []
+
+        reservations = _parse_html(resp.text)
+        log.info(f"📋  {len(reservations)} reservas encontradas")
+        return reservations
+
+    def _auto_login(self) -> bool:
+        """Login automático via Playwright (Chrome headless). Guarda el nuevo token en .env."""
+        if not LH_EMAIL or not LH_PASSWORD:
+            log.error("❌  LH_EMAIL / LH_PASSWORD no configurados en .env")
+            return False
+
+        log.info("🔐  Iniciando sesión con Chrome headless (Playwright)...")
+        try:
+            from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+        except ImportError:
+            log.error("❌  Playwright no instalado. Ejecuta:\n"
+                      "    pip install playwright\n"
+                      "    python -m playwright install chromium")
+            return False
+
+        try:
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch(headless=True)
+                ctx     = browser.new_context()
+                page    = ctx.new_page()
+
+                # 1. Navegar a Little Hotelier → redirige a SiteMinder
+                start = f"{LH_BASE_URL}/frontdesk/{LH_REGION}/{LH_PROPERTY_UUID}/reservations"
+                page.goto(start, wait_until="networkidle", timeout=30_000)
+
+                # Si ya estamos en platform.littlehotelier.com, la sesión aún era válida
+                if LH_BASE_URL in page.url:
+                    log.info("✅  Sesión todavía válida")
+                    browser.close()
+                    return True
+
+                log.info(f"🔍  Redirigido a: {page.url}")
+
+                # 2. Esperar campo de email/usuario
+                page.wait_for_selector(
+                    "input[type='email'], input[name='username'], input[name='email'], input[type='text']",
+                    timeout=15_000
+                )
+
+                # 3. Rellenar email
+                for selector in ["input[type='email']", "input[name='username']",
+                                  "input[name='email']", "input[type='text']"]:
+                    if page.locator(selector).count() > 0:
+                        page.fill(selector, LH_EMAIL)
+                        log.info(f"  ✏️  Email introducido ({selector})")
+                        break
+
+                # 4. Pulsar "Siguiente / Continue / Next" si el formulario es de dos pasos
+                next_btn = page.locator(
+                    "button[type='submit'], input[type='submit'], "
+                    "button:has-text('Next'), button:has-text('Continue'), "
+                    "button:has-text('Siguiente'), button:has-text('Sign in'), "
+                    "button:has-text('Log in')"
+                ).first
+                next_btn.click()
+
+                # 5. Esperar campo de contraseña (puede tardar por ser SPA)
+                page.wait_for_selector("input[type='password']", timeout=15_000)
+                page.fill("input[type='password']", LH_PASSWORD)
+                log.info("  ✏️  Contraseña introducida")
+
+                # 6. Enviar formulario final
+                page.locator(
+                    "button[type='submit'], input[type='submit'], "
+                    "button:has-text('Sign in'), button:has-text('Log in'), "
+                    "button:has-text('Iniciar'), button:has-text('Acceder')"
+                ).first.click()
+
+                # 7. Esperar retorno a platform.littlehotelier.com
+                try:
+                    page.wait_for_url(f"{LH_BASE_URL}/**", timeout=20_000)
+                except PWTimeout:
+                    log.error("❌  Timeout esperando redirección tras login. "
+                              "Verifica credenciales en .env")
+                    browser.close()
+                    return False
+
+                # 8. Extraer cookie lh_session_token
+                cookies = ctx.cookies()
+                token   = next((c["value"] for c in cookies
+                                if c["name"] == "lh_session_token"), None)
+                browser.close()
+
+                if token:
+                    self._save_token_to_env(token)
+                    # Actualizar sesión requests con el nuevo token
+                    self.session.cookies.set(
+                        "lh_session_token", token,
+                        domain="platform.littlehotelier.com"
+                    )
+                    log.info("✅  Sesión renovada automáticamente con Playwright")
+                    return True
+
+                log.error("❌  Login completado pero no se encontró lh_session_token. "
+                          "Verifica credenciales.")
+                return False
+
+        except Exception as e:
+            log.error(f"❌  Error en login automático: {e}")
+            return False
+
+    def _save_token_to_env(self, token: str):
+        """Actualiza el token en memoria y, si es posible, en el archivo .env."""
+        global LH_SESSION_TOKEN
+        # Siempre actualizar en memoria (funciona en Render y local)
+        LH_SESSION_TOKEN = token
+        self.session.cookies.set(
+            "lh_session_token", token,
+            domain="platform.littlehotelier.com"
+        )
+        # Intentar persistir en .env (solo funciona en local)
+        try:
+            with open(ENV_PATH, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            with open(ENV_PATH, "w", encoding="utf-8") as f:
+                for line in lines:
+                    if line.startswith("LH_SESSION_TOKEN="):
+                        f.write(f"LH_SESSION_TOKEN={token}\n")
+                    else:
+                        f.write(line)
+            log.info("💾  Token guardado en .env")
+        except Exception:
+            log.info("💾  Token renovado en memoria (entorno cloud — .env no persiste)")
+
+
+# ─────────────────────────────────────────────────────────────────
+# PARSEO HTML
+# ─────────────────────────────────────────────────────────────────
+def _parse_html(html: str) -> list[dict]:
+    """Extrae reservas del HTML de platform.littlehotelier.com/frontdesk."""
+    soup = BeautifulSoup(html, "lxml")
+    rows = soup.find_all("tr", class_="reservation_room_type")
+
+    reservations = []
+    for row in rows:
+        try:
+            reservations.append(_parse_row(row))
+        except Exception as e:
+            log.warning(f"  ⚠  Fila ignorada por error de parseo: {e}")
+
+    return reservations
+
+
+def _parse_row(row) -> dict:
+    # Estado  (clase CSS en inglés: confirmed, cancelled, etc.)
+    status_span = row.select_one("td.status span")
+    status      = (status_span.get("class") or ["unknown"])[0] if status_span else "unknown"
+
+    # Nombre del huésped
+    name_span  = row.select_one("td.name span.maskContent")
+    guest_name = name_span.get_text(strip=True) if name_span else ""
+
+    # Referencia + IDs internos
+    ref_a     = row.select_one("a.booking-reference")
+    reference = ref_a.get_text(strip=True) if ref_a else ""
+    res_id    = ref_a.get("data-reservation-id", "") if ref_a else ""
+    res_uuid  = ""
+    if ref_a:
+        # href: /frontdesk/emea/{prop_uuid}/reservations/{res_uuid}/edit
+        m = re.search(r"/reservations/([^/]+)/edit", ref_a.get("href", ""))
+        if m:
+            res_uuid = m.group(1)
+
+    # Canal / fuente
+    src_td  = row.select_one("td.booking_source span")
+    channel = src_td.get_text(strip=True) if src_td else ""
+
+    # Huéspedes (adultos / niños / bebés)
+    adults = children = infants = 0
+    guests_spans = row.select("td.guests span")
+    nums = []
+    for s in guests_spans:
+        txt = s.get_text(strip=True)
+        nums.append(int(txt) if txt.isdigit() else 0)
+    if len(nums) > 0: adults   = nums[0]
+    if len(nums) > 1: children = nums[1]
+    if len(nums) > 2: infants  = nums[2]
+
+    # Fechas (formato original DD-MM-YY → YYYY-MM-DD)
+    ci_td = row.select_one("td.check_in")
+    co_td = row.select_one("td.check_out")
+    check_in  = _parse_date(ci_td.get_text(strip=True)) if ci_td else ""
+    check_out = _parse_date(co_td.get_text(strip=True)) if co_td else ""
+
+    # Habitación (array para compatibilidad con el schema de Lovable)
+    room_td   = row.select_one("td.room_name")
+    room_name = room_td.get_text(strip=True) if room_td else ""
+    rooms     = [room_name] if room_name else []
+
+    # Total
+    total_td = row.select_one("td.total")
+    total    = total_td.get_text(strip=True) if total_td else ""
+
+    return {
+        "external_id":   res_id,
+        "uuid":          res_uuid,
+        "reference":     reference,
+        "channel":       channel,
+        "check_in":      check_in,
+        "check_out":     check_out,
+        "rooms":         rooms,
+        "guest_name":    guest_name,
+        "adults":        adults,
+        "children":      children,
+        "infants":       infants,
+        "status":        status,
+        "total":         total,
+        "synced_at":     datetime.now(timezone.utc).isoformat(),
+        "source_system": "little_hotelier",
+    }
+
+
+def _parse_date(s: str) -> str:
+    """DD-MM-YY  →  YYYY-MM-DD"""
+    try:
+        d, m, y = s.split("-")
+        return f"20{y}-{m}-{d}"
+    except Exception:
+        return s
+
+
+def _fmt_display(date_iso: str) -> str:
+    """YYYY-MM-DD  →  '19 may 2026'  (para el parámetro display de LH)"""
+    try:
+        dt = datetime.strptime(date_iso, "%Y-%m-%d")
+        months = ["ene","feb","mar","abr","may","jun",
+                  "jul","ago","sep","oct","nov","dic"]
+        return f"{dt.day} {months[dt.month-1]} {dt.year}"
+    except Exception:
+        return date_iso
+
+
+# ─────────────────────────────────────────────────────────────────
+# CLIENTE LIMPATEX
+# ─────────────────────────────────────────────────────────────────
+class LimpatexAppClient:
+    """
+    Envía reservas a gestionlimpatex.vercel.app.
+
+    El endpoint esperado es:  POST /api/reservations
+    Ver sección final de este archivo para saber qué añadir en tu app.
+    """
+
+    def __init__(self):
+        self.base = APP_URL.rstrip("/")
+        self.sess = requests.Session()
+        self.sess.headers["Content-Type"] = "application/json"
+        if APP_API_KEY:
+            self.sess.headers["Authorization"] = f"Bearer {APP_API_KEY}"
+
+    def upsert(self, reservation: dict) -> bool:
+        url = f"{self.base}/api/reservations"
+        try:
+            resp = self.sess.post(url, json=reservation, timeout=15)
+            if resp.status_code in (200, 201):
+                log.debug(f"  ✓ {reservation['reference']}")
+                return True
+            if resp.status_code == 409:
+                # ya existe → actualizar
+                resp = self.sess.put(
+                    f"{url}/{reservation['external_id']}",
+                    json=reservation, timeout=15
+                )
+                if resp.status_code in (200, 204):
+                    log.debug(f"  ↺ {reservation['reference']} actualizada")
+                    return True
+            log.warning(f"  ⚠ {reservation['reference']}: HTTP {resp.status_code} — {resp.text[:200]}")
+            return False
+        except requests.RequestException as e:
+            log.error(f"  ❌ {reservation['reference']}: {e}")
+            return False
+
+    def send_batch(self, reservations: list[dict]) -> tuple[int, int]:
+        ok = errors = 0
+        for r in reservations:
+            if self.upsert(r):
+                ok += 1
+            else:
+                errors += 1
+            time.sleep(0.1)
+        return ok, errors
+
+
+# ─────────────────────────────────────────────────────────────────
+# SINCRONIZACIÓN
+# ─────────────────────────────────────────────────────────────────
+def sync():
+    log.info("=" * 60)
+    log.info("🚀  Little Hotelier → Limpatex")
+    log.info("=" * 60)
+
+    today     = datetime.today()
+    date_from = (today - timedelta(days=DAYS_BACK)).strftime("%Y-%m-%d")
+    date_to   = (today + timedelta(days=DAYS_AHEAD)).strftime("%Y-%m-%d")
+
+    lh = LittleHotelierClient()
+    reservations = lh.get_reservations(date_from, date_to)
+    if not reservations:
+        log.info("ℹ️   Sin reservas en el período.")
+        return
+
+    with open("reservas_cache.json", "w", encoding="utf-8") as f:
+        json.dump(reservations, f, ensure_ascii=False, indent=2)
+    log.info("💾  Copia local → reservas_cache.json")
+
+    app = LimpatexAppClient()
+    ok, errors = app.send_batch(reservations)
+
+    log.info("─" * 60)
+    log.info(f"✅  {ok} ok · {errors} errores")
+    log.info("=" * 60)
+
+
+def list_mode():
+    """Muestra todas las reservas en tabla de texto."""
+    days = int(next((sys.argv[i+1] for i, a in enumerate(sys.argv) if a == "--days"), DAYS_AHEAD))
+    today     = datetime.today()
+    date_from = (today - timedelta(days=DAYS_BACK)).strftime("%Y-%m-%d")
+    date_to   = (today + timedelta(days=days)).strftime("%Y-%m-%d")
+
+    lh = LittleHotelierClient()
+    reservations = lh.get_reservations(date_from, date_to)
+
+    if not reservations:
+        print("Sin reservas en el período.")
+        return
+
+    print(f"\n{'#':<4} {'ESTADO':<12} {'HUÉSPED':<25} {'REFERENCIA':<20} {'ENTRADA':<12} {'SALIDA':<12} {'HABITACIÓN':<18} {'CANAL'}")
+    print("─" * 120)
+    for i, r in enumerate(reservations, 1):
+        rooms_str = ", ".join(r.get("rooms", [])) or "-"
+        print(
+            f"{i:<4} {r['status']:<12} {r['guest_name'][:24]:<25} "
+            f"{r['reference']:<20} {r['check_in']:<12} {r['check_out']:<12} "
+            f"{rooms_str[:17]:<18} {r['channel']}"
+        )
+    print("─" * 120)
+    print(f"Total: {len(reservations)} reservas  ({date_from} → {date_to})")
+
+
+def debug_mode():
+    """Descarga y muestra reservas sin enviarlas a la app."""
+    log.info("🛠️   MODO DEBUG")
+    today     = datetime.today()
+    date_from = (today - timedelta(days=DAYS_BACK)).strftime("%Y-%m-%d")
+    date_to   = (today + timedelta(days=7)).strftime("%Y-%m-%d")
+
+    lh = LittleHotelierClient()
+    reservations = lh.get_reservations(date_from, date_to)
+
+    print("\n" + "=" * 60)
+    print(f"RESERVAS ({len(reservations)} encontradas):")
+    print("=" * 60)
+    if reservations:
+        print(json.dumps(reservations[0], ensure_ascii=False, indent=2))
+        if len(reservations) > 1:
+            print(f"\n... y {len(reservations)-1} más.")
+    else:
+        print("Sin reservas. Revisa LH_SESSION_TOKEN y LH_PROPERTY_UUID.")
+
+
+# ─────────────────────────────────────────────────────────────────
+# PUNTO DE ENTRADA
+# ─────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import sys
+
+    if "--list" in sys.argv:
+        list_mode()
+    elif "--debug" in sys.argv:
+        debug_mode()
+    elif "--loop" in sys.argv:
+        log.info(f"🔁  Bucle cada {LOOP_INTERVAL // 60} min")
+        while True:
+            try:
+                sync()
+            except Exception as e:
+                log.exception(f"Error en ciclo: {e}")
+            log.info(f"⏳  Próxima sync en {LOOP_INTERVAL // 60} min...")
+            time.sleep(LOOP_INTERVAL)
+    else:
+        sync()
+
+
+# ─────────────────────────────────────────────────────────────────
+# QUÉ ENDPOINT AÑADIR EN TU APP (gestionlimpatex.vercel.app)
+# ─────────────────────────────────────────────────────────────────
+"""
+El script envía un POST a:
+  https://gestionlimpatex.vercel.app/api/reservations
+
+con este JSON por cada reserva:
+
+{
+  "external_id":   "55998893",          ← ID numérico interno de LH
+  "uuid":          "4592b7fd-...",      ← UUID de la reserva en LH
+  "reference":     "BDC-6726731254",   ← referencia visible (Booking.com, etc.)
+  "channel":       "Booking.com",
+  "check_in":      "2026-05-19",
+  "check_out":     "2026-05-20",
+  "room":          "Habitación 2",
+  "guest_name":    "Fisher, Michelle",
+  "adults":        1,
+  "children":      0,
+  "infants":       0,
+  "status":        "confirmed",         ← confirmed | cancelled | no_show …
+  "total":         "72 €",
+  "synced_at":     "2026-05-19T08:00:00Z",
+  "source_system": "little_hotelier"
+}
+
+En tu app (Lovable / Supabase) necesitas:
+
+1. TABLA en Supabase:
+   CREATE TABLE reservations (
+     id           BIGSERIAL PRIMARY KEY,
+     external_id  TEXT UNIQUE NOT NULL,
+     uuid         TEXT,
+     reference    TEXT,
+     channel      TEXT,
+     check_in     DATE,
+     check_out    DATE,
+     room         TEXT,
+     guest_name   TEXT,
+     adults       INT,
+     children     INT,
+     infants      INT,
+     status       TEXT,
+     total        TEXT,
+     synced_at    TIMESTAMPTZ,
+     source_system TEXT,
+     created_at   TIMESTAMPTZ DEFAULT now()
+   );
+
+2. API ROUTE en tu app (Next.js / Vercel):
+   // app/api/reservations/route.ts
+   export async function POST(req: Request) {
+     const data = await req.json();
+     const { data: existing } = await supabase
+       .from("reservations")
+       .select("id")
+       .eq("external_id", data.external_id)
+       .single();
+
+     if (existing) {
+       await supabase.from("reservations").update(data).eq("external_id", data.external_id);
+       return Response.json({ updated: true }, { status: 200 });
+     }
+     await supabase.from("reservations").insert(data);
+     return Response.json({ created: true }, { status: 201 });
+   }
+
+3. Si usas autenticación en la API, genera un token en Supabase o
+   en tu app y ponlo en APP_API_KEY del .env.
+"""
