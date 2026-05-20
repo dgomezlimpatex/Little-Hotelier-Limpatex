@@ -201,36 +201,43 @@ class LittleHotelierClient:
                 page = ctx.new_page()
 
                 import urllib.parse
+                import re as _re
 
-                # Interceptar petición a auth0 y eliminar userDeviceToken de redirect_uri
-                # (el JWT con IP de Render hace que la URL no coincida con los callbacks
-                #  registrados en Auth0, causando "Callback URL mismatch")
-                def _strip_user_device_token(route, request):
-                    url = request.url
-                    if "auth0.siteminder.com/authorize" in url:
-                        parsed  = urllib.parse.urlparse(url)
-                        qp      = dict(urllib.parse.parse_qsl(parsed.query))
-                        ru_raw  = qp.get("redirect_uri", "")
-                        if ru_raw and "userDeviceToken" in ru_raw:
-                            ru      = urllib.parse.urlparse(ru_raw)
-                            ru_qp   = dict(urllib.parse.parse_qsl(ru.query))
-                            ru_qp.pop("userDeviceToken", None)
-                            new_ru  = urllib.parse.urlunparse((
-                                ru.scheme, ru.netloc, ru.path, ru.params,
-                                urllib.parse.urlencode(ru_qp) if ru_qp else "",
-                                ru.fragment,
-                            ))
-                            qp["redirect_uri"] = new_ru
-                            new_url = urllib.parse.urlunparse((
-                                parsed.scheme, parsed.netloc, parsed.path, parsed.params,
-                                urllib.parse.urlencode(qp), parsed.fragment,
-                            ))
-                            log.info(f"  🔧  auth0 redirect_uri saneada → {new_ru}")
+                def _clean_auth0_redirect_uri(url: str) -> str:
+                    """Elimina userDeviceToken de la redirect_uri dentro de una URL de auth0."""
+                    parsed = urllib.parse.urlparse(url)
+                    qp     = dict(urllib.parse.parse_qsl(parsed.query))
+                    ru_raw = qp.get("redirect_uri", "")
+                    if not ru_raw or "userDeviceToken" not in ru_raw:
+                        return url
+                    ru    = urllib.parse.urlparse(ru_raw)
+                    ru_qp = dict(urllib.parse.parse_qsl(ru.query))
+                    ru_qp.pop("userDeviceToken", None)
+                    new_ru = urllib.parse.urlunparse((
+                        ru.scheme, ru.netloc, ru.path, ru.params,
+                        urllib.parse.urlencode(ru_qp) if ru_qp else "",
+                        ru.fragment,
+                    ))
+                    qp["redirect_uri"] = new_ru
+                    return urllib.parse.urlunparse((
+                        parsed.scheme, parsed.netloc, parsed.path, parsed.params,
+                        urllib.parse.urlencode(qp), parsed.fragment,
+                    ))
+
+                # Interceptar request a auth0 (regex — más fiable que glob)
+                def _route_handler(route, request):
+                    try:
+                        new_url = _clean_auth0_redirect_uri(request.url)
+                        if new_url != request.url:
+                            log.info(f"  🔧  Interceptado auth0 — userDeviceToken eliminado")
                             route.continue_(url=new_url)
-                            return
-                    route.continue_()
+                        else:
+                            route.continue_()
+                    except Exception as _e:
+                        log.warning(f"  ⚠️  route handler error: {_e}")
+                        route.continue_()
 
-                page.route("**://auth0.siteminder.com/authorize*", _strip_user_device_token)
+                ctx.route(_re.compile(r"auth0\.siteminder\.com/authorize"), _route_handler)
 
                 # Rastrear cadena completa de URLs de la ventana principal
                 url_chain: list[str] = []
@@ -295,9 +302,9 @@ class LittleHotelierClient:
                 log.info(f"  🔗  URL tras networkidle: {page.url}")
                 log.info(f"  🔗  Cadena URLs: {' → '.join(url_chain[-8:])}")
 
-                # 8. Buscar lh_session_token en cookies durante 30 s
+                # 8. Buscar lh_session_token en cookies durante 20 s
                 token = None
-                deadline = time.time() + 30
+                deadline = time.time() + 20
                 while time.time() < deadline:
                     for c in ctx.cookies():
                         if c["name"] == "lh_session_token":
@@ -308,39 +315,27 @@ class LittleHotelierClient:
                         break
                     time.sleep(1)
 
-                # 9. Si no hay token y estamos en auth0 prompt=none,
-                #    intentar completar el redirect con requests (auth0 usa HTTP 302)
-                if not token and "auth0.siteminder.com/authorize" in page.url:
-                    log.info("  🔄  auth0 prompt=none detectado — completando con requests...")
+                # 9. Fallback: si seguimos en auth0 con userDeviceToken en la URL,
+                #    navegar directamente con la redirect_uri limpia
+                if not token and "auth0.siteminder.com/authorize" in page.url and "userDeviceToken" in page.url:
+                    log.info("  🔧  Fallback: navegando auth0 con redirect_uri limpia...")
+                    clean_url = _clean_auth0_redirect_uri(page.url)
+                    log.info(f"  🔧  URL limpia: {clean_url[:120]}...")
                     try:
-                        r_sess = requests.Session()
-                        r_sess.headers.update({
-                            "User-Agent": (
-                                "Mozilla/5.0 (X11; Linux x86_64) "
-                                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                                "Chrome/124.0.0.0 Safari/537.36"
-                            )
-                        })
-                        for c in ctx.cookies():
-                            domain = c.get("domain", "").lstrip(".")
-                            if domain:
-                                r_sess.cookies.set(c["name"], c["value"], domain=domain)
-                        auth0_url = page.url
-                        r_resp = r_sess.get(auth0_url, timeout=20, allow_redirects=True)
-                        log.info(f"  🔗  requests URL final: {r_resp.url} (HTTP {r_resp.status_code})")
-                        for ck in r_sess.cookies:
-                            if ck.name == "lh_session_token":
-                                token = ck.value
-                                # Copiar todas las cookies LH a self.session
-                                for ck2 in r_sess.cookies:
-                                    if "littlehotelier.com" in (ck2.domain or ""):
-                                        self.session.cookies.set(
-                                            ck2.name, ck2.value, domain=ck2.domain
-                                        )
-                                log.info("  ✅  lh_session_token obtenido vía requests redirect")
+                        page.goto(clean_url, wait_until="networkidle", timeout=30_000)
+                        log.info(f"  🔗  URL tras retry: {page.url}")
+                        deadline2 = time.time() + 20
+                        while time.time() < deadline2:
+                            for c in ctx.cookies():
+                                if c["name"] == "lh_session_token":
+                                    token = c["value"]
+                                    break
+                            if token:
+                                log.info(f"  ✅  Cookie detectada tras fallback")
                                 break
-                    except Exception as e:
-                        log.warning(f"  ⚠️  requests fallback error: {e}")
+                            time.sleep(1)
+                    except Exception as _e:
+                        log.warning(f"  ⚠️  Fallback navigate error: {_e}")
 
                 if not token:
                     log.error(f"❌  Timeout. URL final: {page.url}")
