@@ -246,43 +246,45 @@ class LittleHotelierClient:
                     "button:has-text('Iniciar'), button:has-text('Acceder')"
                 ).first.click()
 
-                # 7. Esperar retorno a platform.littlehotelier.com (auth0 añade pasos extra)
-                try:
-                    page.wait_for_url(f"{LH_BASE_URL}/**", timeout=45_000)
-                except PWTimeout:
-                    log.error(f"❌  Timeout. URL final: {page.url}")
-                    # Capturar screenshot para diagnóstico
+                # 7. Esperar a que se establezca lh_session_token en las cookies
+                # (no esperamos la URL final — auth0 silent-auth puede quedarse colgado
+                #  en browsers frescos sin historial de auth0.siteminder.com)
+                log.info("  ⏳  Esperando cookie lh_session_token...")
+                deadline = time.time() + 60
+                token = None
+                while time.time() < deadline:
+                    cookies_now = ctx.cookies()
+                    for c in cookies_now:
+                        if c["name"] == "lh_session_token":
+                            token = c["value"]
+                            break
+                    if token:
+                        log.info(f"  ✅  Cookie detectada (URL actual: {page.url})")
+                        break
+                    time.sleep(0.5)
+
+                if not token:
+                    log.error(f"❌  Timeout (60s). URL final: {page.url}")
                     try:
                         page.screenshot(path="login_timeout.png")
-                        log.info("  📸  Screenshot guardado: login_timeout.png")
+                        log.info("  📸  Screenshot: login_timeout.png")
                     except Exception:
                         pass
                     browser.close()
                     return False
 
-                log.info(f"  ✅  Redirigido a LH: {page.url}")
-
                 # 8. Copiar TODAS las cookies de LH al requests session
-                cookies = ctx.cookies()
-                log.info(f"  🍪  Cookies obtenidas: {[c['name'] for c in cookies]}")
-
-                token = None
-                for c in cookies:
+                all_cookies = ctx.cookies()
+                log.info(f"  🍪  Cookies: {[c['name'] for c in all_cookies]}")
+                for c in all_cookies:
                     domain = c.get("domain", "").lstrip(".")
                     if "littlehotelier.com" in domain:
                         self.session.cookies.set(c["name"], c["value"], domain=domain)
-                    if c["name"] == "lh_session_token":
-                        token = c["value"]
 
                 browser.close()
-
-                if token:
-                    self._save_token_to_env(token)
-                    log.info("✅  Sesión renovada — todas las cookies copiadas al cliente")
-                    return True
-
-                log.error("❌  Login completado pero no se encontró lh_session_token.")
-                return False
+                self._save_token_to_env(token)
+                log.info("✅  Sesión renovada — todas las cookies copiadas al cliente")
+                return True
 
         except Exception as e:
             log.error(f"❌  Error en login automático: {e}")
