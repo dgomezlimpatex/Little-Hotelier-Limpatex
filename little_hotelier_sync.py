@@ -200,8 +200,39 @@ class LittleHotelierClient:
                 )
                 page = ctx.new_page()
 
-                # Rastrear cadena completa de URLs de la ventana principal
                 import urllib.parse
+
+                # Interceptar petición a auth0 y eliminar userDeviceToken de redirect_uri
+                # (el JWT con IP de Render hace que la URL no coincida con los callbacks
+                #  registrados en Auth0, causando "Callback URL mismatch")
+                def _strip_user_device_token(route, request):
+                    url = request.url
+                    if "auth0.siteminder.com/authorize" in url:
+                        parsed  = urllib.parse.urlparse(url)
+                        qp      = dict(urllib.parse.parse_qsl(parsed.query))
+                        ru_raw  = qp.get("redirect_uri", "")
+                        if ru_raw and "userDeviceToken" in ru_raw:
+                            ru      = urllib.parse.urlparse(ru_raw)
+                            ru_qp   = dict(urllib.parse.parse_qsl(ru.query))
+                            ru_qp.pop("userDeviceToken", None)
+                            new_ru  = urllib.parse.urlunparse((
+                                ru.scheme, ru.netloc, ru.path, ru.params,
+                                urllib.parse.urlencode(ru_qp) if ru_qp else "",
+                                ru.fragment,
+                            ))
+                            qp["redirect_uri"] = new_ru
+                            new_url = urllib.parse.urlunparse((
+                                parsed.scheme, parsed.netloc, parsed.path, parsed.params,
+                                urllib.parse.urlencode(qp), parsed.fragment,
+                            ))
+                            log.info(f"  🔧  auth0 redirect_uri saneada → {new_ru}")
+                            route.continue_(url=new_url)
+                            return
+                    route.continue_()
+
+                page.route("**://auth0.siteminder.com/authorize*", _strip_user_device_token)
+
+                # Rastrear cadena completa de URLs de la ventana principal
                 url_chain: list[str] = []
                 page.on("framenavigated",
                         lambda f: url_chain.append(f.url) if f == page.main_frame else None)
