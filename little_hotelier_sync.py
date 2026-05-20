@@ -204,32 +204,43 @@ class LittleHotelierClient:
                 import re as _re
 
                 def _clean_auth0_redirect_uri(url: str) -> str:
-                    """Elimina userDeviceToken de la redirect_uri dentro de una URL de auth0."""
+                    """Elimina TODOS los query params de redirect_uri en una URL de auth0.
+
+                    Auth0 tiene registrado el callback SIN query params.
+                    LH añade ?userDeviceToken=... y ?tenantCode=... dinámicamente,
+                    lo que provoca "Callback URL mismatch".
+                    """
                     parsed = urllib.parse.urlparse(url)
                     qp     = dict(urllib.parse.parse_qsl(parsed.query))
                     ru_raw = qp.get("redirect_uri", "")
-                    if not ru_raw or "userDeviceToken" not in ru_raw:
+                    if not ru_raw:
                         return url
-                    ru    = urllib.parse.urlparse(ru_raw)
-                    ru_qp = dict(urllib.parse.parse_qsl(ru.query))
-                    ru_qp.pop("userDeviceToken", None)
+                    ru = urllib.parse.urlparse(ru_raw)
+                    # Callback limpio: solo scheme + host + path, sin query params
                     new_ru = urllib.parse.urlunparse((
-                        ru.scheme, ru.netloc, ru.path, ru.params,
-                        urllib.parse.urlencode(ru_qp) if ru_qp else "",
-                        ru.fragment,
+                        ru.scheme, ru.netloc, ru.path, "", "", "",
                     ))
+                    if new_ru == ru_raw:
+                        return url  # ya está limpio
                     qp["redirect_uri"] = new_ru
+                    log.info(f"  🔧  redirect_uri limpia: {new_ru}")
                     return urllib.parse.urlunparse((
                         parsed.scheme, parsed.netloc, parsed.path, parsed.params,
                         urllib.parse.urlencode(qp), parsed.fragment,
                     ))
 
-                # Interceptar request a auth0 (regex — más fiable que glob)
+                # Interceptar TODAS las peticiones a auth0/authorize (iframe + main frame)
+                _intercept_count = [0]
+
                 def _route_handler(route, request):
                     try:
+                        _intercept_count[0] += 1
+                        log.info(
+                            f"  🔧  Interceptando auth0 #{_intercept_count[0]} "
+                            f"({request.resource_type}) — {request.url[:80]}..."
+                        )
                         new_url = _clean_auth0_redirect_uri(request.url)
                         if new_url != request.url:
-                            log.info(f"  🔧  Interceptado auth0 — userDeviceToken eliminado")
                             route.continue_(url=new_url)
                         else:
                             route.continue_()
