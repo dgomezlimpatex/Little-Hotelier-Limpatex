@@ -200,19 +200,28 @@ class LittleHotelierClient:
                 )
                 page = ctx.new_page()
 
-                # 1. Navegar directamente a SiteMinder (sabemos que la sesión está expirada)
+                # Rastrear cadena completa de URLs de la ventana principal
                 import urllib.parse
+                url_chain: list[str] = []
+                page.on("framenavigated",
+                        lambda f: url_chain.append(f.url) if f == page.main_frame else None)
+
+                # 1. Navegar directamente a SiteMinder
                 redirect_uri = urllib.parse.quote(
                     f"{LH_BASE_URL}/frontdesk/{LH_REGION}/{LH_PROPERTY_UUID}/reservations",
                     safe=""
                 )
-                siteminder_url = f"https://littlehotelier.authx.siteminder.com/login?redirectUri={redirect_uri}"
+                siteminder_url = (
+                    f"https://littlehotelier.authx.siteminder.com/login"
+                    f"?redirectUri={redirect_uri}"
+                )
                 page.goto(siteminder_url, wait_until="domcontentloaded", timeout=30_000)
                 log.info(f"🔍  URL SiteMinder: {page.url}")
 
                 # 2. Esperar campo de email/usuario
                 page.wait_for_selector(
-                    "input[type='email'], input[name='username'], input[name='email'], input[type='text']",
+                    "input[type='email'], input[name='username'], "
+                    "input[name='email'], input[type='text']",
                     timeout=15_000
                 )
 
@@ -224,7 +233,7 @@ class LittleHotelierClient:
                         log.info(f"  ✏️  Email introducido ({selector})")
                         break
 
-                # 4. Pulsar "Siguiente / Continue / Next" si el formulario es de dos pasos
+                # 4. Pulsar "Siguiente"
                 next_btn = page.locator(
                     "button[type='submit'], input[type='submit'], "
                     "button:has-text('Next'), button:has-text('Continue'), "
@@ -234,40 +243,87 @@ class LittleHotelierClient:
                 next_btn.click()
                 log.info(f"  🖱️  Botón 'siguiente' pulsado, URL: {page.url}")
 
-                # 5. Esperar campo de contraseña (puede tardar por ser SPA)
+                # 5. Esperar campo de contraseña
                 page.wait_for_selector("input[type='password']", timeout=15_000)
                 page.fill("input[type='password']", LH_PASSWORD)
                 log.info("  ✏️  Contraseña introducida")
 
-                # 6. Enviar formulario final
+                # 6. Enviar formulario
                 page.locator(
                     "button[type='submit'], input[type='submit'], "
                     "button:has-text('Sign in'), button:has-text('Log in'), "
                     "button:has-text('Iniciar'), button:has-text('Acceder')"
                 ).first.click()
+                log.info("  🖱️  Formulario enviado")
 
-                # 7. Esperar a que se establezca lh_session_token en las cookies
-                # (no esperamos la URL final — auth0 silent-auth puede quedarse colgado
-                #  en browsers frescos sin historial de auth0.siteminder.com)
-                log.info("  ⏳  Esperando cookie lh_session_token...")
-                deadline = time.time() + 60
+                # 7. Esperar que la navegación se estabilice
+                try:
+                    page.wait_for_load_state("networkidle", timeout=20_000)
+                except Exception:
+                    pass
+                log.info(f"  🔗  URL tras networkidle: {page.url}")
+                log.info(f"  🔗  Cadena URLs: {' → '.join(url_chain[-8:])}")
+
+                # 8. Buscar lh_session_token en cookies durante 30 s
                 token = None
+                deadline = time.time() + 30
                 while time.time() < deadline:
-                    cookies_now = ctx.cookies()
-                    for c in cookies_now:
+                    for c in ctx.cookies():
                         if c["name"] == "lh_session_token":
                             token = c["value"]
                             break
                     if token:
-                        log.info(f"  ✅  Cookie detectada (URL actual: {page.url})")
+                        log.info(f"  ✅  Cookie detectada (URL: {page.url})")
                         break
-                    time.sleep(0.5)
+                    time.sleep(1)
+
+                # 9. Si no hay token y estamos en auth0 prompt=none,
+                #    intentar completar el redirect con requests (auth0 usa HTTP 302)
+                if not token and "auth0.siteminder.com/authorize" in page.url:
+                    log.info("  🔄  auth0 prompt=none detectado — completando con requests...")
+                    try:
+                        r_sess = requests.Session()
+                        r_sess.headers.update({
+                            "User-Agent": (
+                                "Mozilla/5.0 (X11; Linux x86_64) "
+                                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                "Chrome/124.0.0.0 Safari/537.36"
+                            )
+                        })
+                        for c in ctx.cookies():
+                            domain = c.get("domain", "").lstrip(".")
+                            if domain:
+                                r_sess.cookies.set(c["name"], c["value"], domain=domain)
+                        auth0_url = page.url
+                        r_resp = r_sess.get(auth0_url, timeout=20, allow_redirects=True)
+                        log.info(f"  🔗  requests URL final: {r_resp.url} (HTTP {r_resp.status_code})")
+                        for ck in r_sess.cookies:
+                            if ck.name == "lh_session_token":
+                                token = ck.value
+                                # Copiar todas las cookies LH a self.session
+                                for ck2 in r_sess.cookies:
+                                    if "littlehotelier.com" in (ck2.domain or ""):
+                                        self.session.cookies.set(
+                                            ck2.name, ck2.value, domain=ck2.domain
+                                        )
+                                log.info("  ✅  lh_session_token obtenido vía requests redirect")
+                                break
+                    except Exception as e:
+                        log.warning(f"  ⚠️  requests fallback error: {e}")
 
                 if not token:
-                    log.error(f"❌  Timeout (60s). URL final: {page.url}")
+                    log.error(f"❌  Timeout. URL final: {page.url}")
+                    # Diagnóstico de la página actual
                     try:
-                        page.screenshot(path="login_timeout.png")
-                        log.info("  📸  Screenshot: login_timeout.png")
+                        title = page.title()
+                        body_text = page.locator("body").inner_text()[:400]
+                        log.info(f"  📄  Título: {title!r}")
+                        log.info(f"  📄  Texto: {body_text!r}")
+                    except Exception:
+                        pass
+                    try:
+                        all_cookie_names = [c["name"] for c in ctx.cookies()]
+                        log.info(f"  🍪  Todas las cookies: {all_cookie_names}")
                     except Exception:
                         pass
                     browser.close()
