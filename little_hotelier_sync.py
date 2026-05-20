@@ -183,18 +183,15 @@ class LittleHotelierClient:
                 ctx     = browser.new_context()
                 page    = ctx.new_page()
 
-                # 1. Navegar a Little Hotelier → redirige a SiteMinder
-                start = f"{LH_BASE_URL}/frontdesk/{LH_REGION}/{LH_PROPERTY_UUID}/reservations"
-                page.goto(start, wait_until="networkidle", timeout=30_000)
-
-                # Si ya estamos en platform.littlehotelier.com, la sesión aún era válida
-                # IMPORTANTE: usar startswith para no confundir con redirectUri en la URL de SiteMinder
-                if page.url.startswith(LH_BASE_URL):
-                    log.info("✅  Sesión todavía válida")
-                    browser.close()
-                    return True
-
-                log.info(f"🔍  URL en SiteMinder: {page.url}")
+                # 1. Navegar directamente a SiteMinder (sabemos que la sesión está expirada)
+                import urllib.parse
+                redirect_uri = urllib.parse.quote(
+                    f"{LH_BASE_URL}/frontdesk/{LH_REGION}/{LH_PROPERTY_UUID}/reservations",
+                    safe=""
+                )
+                siteminder_url = f"https://littlehotelier.authx.siteminder.com/login?redirectUri={redirect_uri}"
+                page.goto(siteminder_url, wait_until="domcontentloaded", timeout=30_000)
+                log.info(f"🔍  URL SiteMinder: {page.url}")
 
                 # 2. Esperar campo de email/usuario
                 page.wait_for_selector(
