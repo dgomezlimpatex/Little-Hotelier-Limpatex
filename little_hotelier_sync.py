@@ -146,6 +146,7 @@ class LittleHotelierClient:
                 # Reintentar con la nueva sesión
                 try:
                     resp = self.session.get(url, params=params, timeout=30)
+                    log.info(f"🔄  Retry → URL final: {resp.url} | HTTP {resp.status_code}")
                 except requests.RequestException as e:
                     log.error(f"❌  Error tras relogin: {e}")
                     return []
@@ -193,7 +194,7 @@ class LittleHotelierClient:
                     browser.close()
                     return True
 
-                log.info(f"🔍  Redirigido a: {page.url}")
+                log.info(f"🔍  URL en SiteMinder: {page.url}")
 
                 # 2. Esperar campo de email/usuario
                 page.wait_for_selector(
@@ -217,6 +218,7 @@ class LittleHotelierClient:
                     "button:has-text('Log in')"
                 ).first
                 next_btn.click()
+                log.info(f"  🖱️  Botón 'siguiente' pulsado, URL: {page.url}")
 
                 # 5. Esperar campo de contraseña (puede tardar por ser SPA)
                 page.wait_for_selector("input[type='password']", timeout=15_000)
@@ -234,29 +236,32 @@ class LittleHotelierClient:
                 try:
                     page.wait_for_url(f"{LH_BASE_URL}/**", timeout=20_000)
                 except PWTimeout:
-                    log.error("❌  Timeout esperando redirección tras login. "
-                              "Verifica credenciales en .env")
+                    log.error(f"❌  Timeout. URL final: {page.url}")
                     browser.close()
                     return False
 
-                # 8. Extraer cookie lh_session_token
+                log.info(f"  ✅  Redirigido a LH: {page.url}")
+
+                # 8. Copiar TODAS las cookies de LH al requests session
                 cookies = ctx.cookies()
-                token   = next((c["value"] for c in cookies
-                                if c["name"] == "lh_session_token"), None)
+                log.info(f"  🍪  Cookies obtenidas: {[c['name'] for c in cookies]}")
+
+                token = None
+                for c in cookies:
+                    domain = c.get("domain", "").lstrip(".")
+                    if "littlehotelier.com" in domain:
+                        self.session.cookies.set(c["name"], c["value"], domain=domain)
+                    if c["name"] == "lh_session_token":
+                        token = c["value"]
+
                 browser.close()
 
                 if token:
                     self._save_token_to_env(token)
-                    # Actualizar sesión requests con el nuevo token
-                    self.session.cookies.set(
-                        "lh_session_token", token,
-                        domain="platform.littlehotelier.com"
-                    )
-                    log.info("✅  Sesión renovada automáticamente con Playwright")
+                    log.info("✅  Sesión renovada — todas las cookies copiadas al cliente")
                     return True
 
-                log.error("❌  Login completado pero no se encontró lh_session_token. "
-                          "Verifica credenciales.")
+                log.error("❌  Login completado pero no se encontró lh_session_token.")
                 return False
 
         except Exception as e:
