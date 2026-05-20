@@ -179,9 +179,26 @@ class LittleHotelierClient:
 
         try:
             with sync_playwright() as pw:
-                browser = pw.chromium.launch(headless=True)
-                ctx     = browser.new_context()
-                page    = ctx.new_page()
+                browser = pw.chromium.launch(
+                    headless=True,
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--no-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-gpu",
+                    ],
+                )
+                ctx = browser.new_context(
+                    user_agent=(
+                        "Mozilla/5.0 (X11; Linux x86_64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                    extra_http_headers={
+                        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+                    },
+                )
+                page = ctx.new_page()
 
                 # 1. Navegar directamente a SiteMinder (sabemos que la sesión está expirada)
                 import urllib.parse
@@ -229,11 +246,17 @@ class LittleHotelierClient:
                     "button:has-text('Iniciar'), button:has-text('Acceder')"
                 ).first.click()
 
-                # 7. Esperar retorno a platform.littlehotelier.com
+                # 7. Esperar retorno a platform.littlehotelier.com (auth0 añade pasos extra)
                 try:
-                    page.wait_for_url(f"{LH_BASE_URL}/**", timeout=20_000)
+                    page.wait_for_url(f"{LH_BASE_URL}/**", timeout=45_000)
                 except PWTimeout:
                     log.error(f"❌  Timeout. URL final: {page.url}")
+                    # Capturar screenshot para diagnóstico
+                    try:
+                        page.screenshot(path="login_timeout.png")
+                        log.info("  📸  Screenshot guardado: login_timeout.png")
+                    except Exception:
+                        pass
                     browser.close()
                     return False
 
