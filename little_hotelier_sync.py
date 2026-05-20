@@ -187,7 +187,8 @@ class LittleHotelierClient:
                 page.goto(start, wait_until="networkidle", timeout=30_000)
 
                 # Si ya estamos en platform.littlehotelier.com, la sesión aún era válida
-                if LH_BASE_URL in page.url:
+                # IMPORTANTE: usar startswith para no confundir con redirectUri en la URL de SiteMinder
+                if page.url.startswith(LH_BASE_URL):
                     log.info("✅  Sesión todavía válida")
                     browser.close()
                     return True
