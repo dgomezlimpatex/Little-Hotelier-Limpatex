@@ -1,0 +1,119 @@
+2026-05-19 11:14:55,703  INFO      🛠️   MODO DEBUG
+2026-05-19 11:14:55,724  INFO      📥  Obteniendo reservas 2026-05-19 → 2026-05-26 ...
+2026-05-19 11:14:57,784  INFO      📋  22 reservas encontradas
+2026-05-19 12:42:38,849  INFO      ============================================================
+2026-05-19 12:42:38,850  INFO      🚀  Little Hotelier → Limpatex
+2026-05-19 12:42:38,850  INFO      ============================================================
+2026-05-19 12:42:38,859  INFO      📥  Obteniendo reservas 2026-05-19 → 2026-06-18 ...
+2026-05-19 12:42:43,907  INFO      📋  88 reservas encontradas
+2026-05-19 12:42:43,919  INFO      💾  Copia local → reservas_cache.json
+2026-05-19 12:43:28,068  INFO      ────────────────────────────────────────────────────────────
+2026-05-19 12:43:28,069  INFO      ✅  88 ok · 0 errores
+2026-05-19 12:43:28,073  INFO      ============================================================
+2026-05-19 13:09:37,765  INFO      ============================================================
+2026-05-19 13:09:37,765  INFO      🚀  Little Hotelier → Limpatex
+2026-05-19 13:09:37,765  INFO      ============================================================
+2026-05-19 13:09:37,769  INFO      📥  Obteniendo reservas 2026-05-19 → 2026-06-18 ...
+2026-05-19 13:09:42,159  INFO      📋  88 reservas encontradas
+2026-05-19 13:09:42,163  INFO      💾  Copia local → reservas_cache.json
+2026-05-19 13:10:22,183  INFO      ────────────────────────────────────────────────────────────
+2026-05-19 13:10:22,183  INFO      ✅  88 ok · 0 errores
+2026-05-19 13:10:22,184  INFO      ============================================================
+2026-05-19 13:16:12,875  INFO      ============================================================
+2026-05-19 13:16:12,875  INFO      🚀  Little Hotelier → Limpatex
+2026-05-19 13:16:12,877  INFO      ============================================================
+2026-05-19 13:16:12,880  INFO      📥  Obteniendo reservas 2026-05-19 → 2026-06-18 ...
+2026-05-19 13:16:16,271  INFO      📋  88 reservas encontradas
+2026-05-19 13:16:16,273  INFO      💾  Copia local → reservas_cache.json
+2026-05-19 13:17:02,527  INFO      ────────────────────────────────────────────────────────────
+2026-05-19 13:17:02,527  INFO      ✅  88 ok · 0 errores
+2026-05-19 13:17:02,528  INFO      ============================================================
+2026-05-19 13:24:06,929  INFO      📥  Obteniendo reservas 2026-05-19 → 2026-06-18 ...
+2026-05-19 13:24:10,236  INFO      📋  88 reservas encontradas
+2026-05-19 13:24:10,711  INFO      📥  Obteniendo reservas 2026-05-19 → 2026-07-18 ...
+2026-05-19 13:24:13,431  INFO      📋  94 reservas encontradas
+2026-05-19 13:24:13,901  INFO      📥  Obteniendo reservas 2026-05-19 → 2026-08-17 ...
+2026-05-19 13:24:16,927  INFO      📋  94 reservas encontradas
+2026-05-19 13:44:03,296  INFO      📥  Obteniendo reservas 2026-05-12 → 2026-06-18 ...
+2026-05-19 13:44:06,681  INFO      📋  100 reservas encontradas
+2026-05-19 13:46:23,717  INFO      ============================================================
+2026-05-19 13:46:23,717  INFO      🚀  Little Hotelier → Limpatex
+2026-05-19 13:46:23,717  INFO      ============================================================
+2026-05-19 13:46:23,720  INFO      📥  Obteniendo reservas 2026-05-12 → 2026-06-18 ...
+2026-05-19 13:46:26,771  INFO      📋  100 reservas encontradas
+2026-05-19 13:46:26,774  INFO      💾  Copia local → reservas_cache.json
+2026-05-19 13:47:12,355  INFO      ────────────────────────────────────────────────────────────
+2026-05-19 13:47:12,356  INFO      ✅  100 ok · 0 errores
+2026-05-19 13:47:12,356  INFO      ============================================================
+2026-05-19 13:52:55,150  INFO      ============================================================
+2026-05-19 13:52:55,150  INFO      🚀  Little Hotelier → Limpatex
+2026-05-19 13:52:55,151  INFO      ============================================================
+2026-05-19 13:52:55,153  INFO      📥  Obteniendo reservas 2026-05-12 → 2026-06-18 ...
+2026-05-19 13:53:00,118  INFO      📋  100 reservas encontradas
+2026-05-19 13:53:00,121  INFO      💾  Copia local → reservas_cache.json
+2026-05-19 13:53:43,737  INFO      ────────────────────────────────────────────────────────────
+2026-05-19 13:53:43,738  INFO      ✅  100 ok · 0 errores
+2026-05-19 13:53:43,739  INFO      ============================================================
+2026-05-19 17:46:17,523  INFO      ============================================================
+2026-05-19 17:46:17,523  INFO      🚀  Little Hotelier → Limpatex
+2026-05-19 17:46:17,523  INFO      ============================================================
+2026-05-19 17:46:17,526  INFO      📥  Obteniendo reservas 2026-05-12 → 2026-06-18 ...
+2026-05-19 17:46:19,114  ERROR     ❌  Sesión expirada o token inválido.
+    Renueva LH_SESSION_TOKEN en el .env (F12 → Application → Cookies).
+2026-05-19 17:46:19,115  INFO      ℹ️   Sin reservas en el período.
+2026-05-19 17:50:00,222  INFO      ============================================================
+2026-05-19 17:50:00,222  INFO      🚀  Little Hotelier → Limpatex
+2026-05-19 17:50:00,223  INFO      ============================================================
+2026-05-19 17:50:00,225  INFO      📥  Obteniendo reservas 2026-05-12 → 2026-06-18 ...
+2026-05-19 17:50:03,527  INFO      📋  100 reservas encontradas
+2026-05-19 17:50:03,530  INFO      💾  Copia local → reservas_cache.json
+2026-05-19 17:50:47,049  INFO      ────────────────────────────────────────────────────────────
+2026-05-19 17:50:47,049  INFO      ✅  100 ok · 0 errores
+2026-05-19 17:50:47,050  INFO      ============================================================
+2026-05-20 11:24:54,198  INFO      🛠️   MODO DEBUG
+2026-05-20 11:24:54,218  INFO      📥  Obteniendo reservas 2026-05-13 → 2026-05-27 ...
+2026-05-20 11:24:55,464  WARNING   ⚠️  Sesión expirada — intentando login automático...
+2026-05-20 11:24:55,465  INFO      🔐  Iniciando sesión con usuario y contraseña...
+2026-05-20 11:24:56,008  ERROR     ❌  No se encontró formulario en la página de SiteMinder
+2026-05-20 11:24:56,009  ERROR     ❌  No se pudo renovar la sesión. Comprueba LH_EMAIL y LH_PASSWORD en .env
+2026-05-20 11:26:44,829  INFO      🛠️   MODO DEBUG
+2026-05-20 11:26:44,832  INFO      📥  Obteniendo reservas 2026-05-13 → 2026-05-27 ...
+2026-05-20 11:27:15,322  ERROR     ❌  Error de red: HTTPSConnectionPool(host='platform.littlehotelier.com', port=443): Read timed out. (read timeout=30)
+2026-05-20 11:27:33,442  INFO      🛠️   MODO DEBUG
+2026-05-20 11:27:33,445  INFO      📥  Obteniendo reservas 2026-05-13 → 2026-05-27 ...
+2026-05-20 11:27:34,586  WARNING   ⚠️  Sesión expirada — intentando login automático...
+2026-05-20 11:27:34,586  INFO      🔐  Iniciando sesión con usuario y contraseña...
+2026-05-20 11:27:34,792  INFO      🔍  SiteMinder URL: https://littlehotelier.authx.siteminder.com?redirectUri=https://platform.littlehotelier.com/frontdesk/emea/authenticate
+2026-05-20 11:27:34,794  INFO      💾  HTML de SiteMinder guardado en: C:\Users\danig\Downloads\little hotelier\files\siteminder_debug.html
+2026-05-20 11:27:34,796  ERROR     ❌  No se encontró formulario en la página de SiteMinder
+2026-05-20 11:27:34,796  INFO      ℹ️   Revisa siteminder_debug.html para ver la estructura de la página
+2026-05-20 11:27:34,796  ERROR     ❌  No se pudo renovar la sesión. Comprueba LH_EMAIL y LH_PASSWORD en .env
+2026-05-20 11:34:46,335  INFO      🛠️   MODO DEBUG
+2026-05-20 11:34:46,338  INFO      📥  Obteniendo reservas 2026-05-13 → 2026-05-27 ...
+2026-05-20 11:34:47,991  WARNING   ⚠️  Sesión expirada — intentando login automático...
+2026-05-20 11:34:47,991  INFO      🔐  Iniciando sesión con Chrome headless (Playwright)...
+2026-05-20 11:34:55,345  INFO      🔍  Redirigido a: https://littlehotelier.authx.siteminder.com/login?redirectUri=https%3A%2F%2Fplatform.littlehotelier.com%2Ffrontdesk%2Femea%2Fauthenticate
+2026-05-20 11:35:25,465  ERROR     ❌  Error en login automático: Page.fill: Timeout 30000ms exceeded.
+Call log:
+  - waiting for locator("input[type='password']")
+
+2026-05-20 11:35:25,465  ERROR     ❌  No se pudo renovar la sesión. Comprueba LH_EMAIL y LH_PASSWORD en .env
+2026-05-20 11:37:24,264  INFO      🛠️   MODO DEBUG
+2026-05-20 11:37:24,267  INFO      📥  Obteniendo reservas 2026-05-13 → 2026-05-27 ...
+2026-05-20 11:37:25,761  WARNING   ⚠️  Sesión expirada — intentando login automático...
+2026-05-20 11:37:25,762  INFO      🔐  Iniciando sesión con Chrome headless (Playwright)...
+2026-05-20 11:37:28,724  INFO      🔍  Redirigido a: https://littlehotelier.authx.siteminder.com/login?redirectUri=https%3A%2F%2Fplatform.littlehotelier.com%2Ffrontdesk%2Femea%2Fauthenticate
+2026-05-20 11:37:28,770  INFO        ✏️  Email introducido (input[type='email'])
+2026-05-20 11:37:28,852  INFO        ✏️  Contraseña introducida
+2026-05-20 11:37:37,196  INFO      💾  Nuevo token guardado en .env
+2026-05-20 11:37:37,196  INFO      ✅  Sesión renovada automáticamente con Playwright
+2026-05-20 11:37:38,824  INFO      📋  48 reservas encontradas
+2026-05-20 11:42:23,512  INFO      ============================================================
+2026-05-20 11:42:23,512  INFO      🚀  Little Hotelier → Limpatex
+2026-05-20 11:42:23,512  INFO      ============================================================
+2026-05-20 11:42:23,515  INFO      📥  Obteniendo reservas 2026-05-13 → 2026-06-19 ...
+2026-05-20 11:42:26,477  INFO      📋  100 reservas encontradas
+2026-05-20 11:42:26,480  INFO      💾  Copia local → reservas_cache.json
+2026-05-20 11:43:10,807  INFO      ────────────────────────────────────────────────────────────
+2026-05-20 11:43:10,807  INFO      ✅  100 ok · 0 errores
+2026-05-20 11:43:10,809  INFO      ============================================================
