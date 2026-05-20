@@ -1,0 +1,8 @@
+.env
+*.log
+__pycache__/
+*.pyc
+reservas_cache.json
+siteminder_debug.html
+venv/
+browsers/
