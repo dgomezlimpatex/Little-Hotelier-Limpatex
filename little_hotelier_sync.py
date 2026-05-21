@@ -141,7 +141,16 @@ class LittleHotelierClient:
             return []
 
         if resp.status_code == 401 or "authx.siteminder.com" in resp.url:
-            log.warning("⚠️  Sesión expirada — intentando login automático...")
+            log.warning("⚠️  Sesión expirada")
+            # En entornos cloud (Render, etc.) el auto-login falla porque LH
+            # devuelve 500 desde IPs de datacenter. Permitir desactivarlo con
+            # DISABLE_AUTO_LOGIN=1 para fallar rápido en esos entornos.
+            if os.getenv("DISABLE_AUTO_LOGIN") == "1":
+                log.error("❌  Auto-login desactivado (DISABLE_AUTO_LOGIN=1).")
+                log.error("    Refresca LH_SESSION_TOKEN manualmente con:")
+                log.error("    python little_hotelier_sync.py --login")
+                return []
+            log.info("    Intentando login automático...")
             if self._auto_login():
                 # Reintentar con la nueva sesión
                 try:
