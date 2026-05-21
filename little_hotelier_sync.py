@@ -201,62 +201,12 @@ class LittleHotelierClient:
                 page = ctx.new_page()
 
                 import urllib.parse
-                import re as _re
 
-                def _clean_auth0_redirect_uri(url: str) -> str:
-                    """Elimina query params de redirect_uri SOLO cuando apunta a
-                    platform.littlehotelier.com (no tocar redirects internos de SiteMinder).
-                    """
-                    parsed = urllib.parse.urlparse(url)
-                    qp     = dict(urllib.parse.parse_qsl(parsed.query))
-                    ru_raw = qp.get("redirect_uri", "")
-                    if not ru_raw:
-                        return url
-                    # Solo modificar redirect_uri que apunten a platform.littlehotelier.com
-                    if "platform.littlehotelier.com" not in ru_raw:
-                        return url
-                    ru = urllib.parse.urlparse(ru_raw)
-                    new_ru = urllib.parse.urlunparse((
-                        ru.scheme, ru.netloc, ru.path, "", "", "",
-                    ))
-                    if new_ru == ru_raw:
-                        return url  # ya está limpio
-                    qp["redirect_uri"] = new_ru
-                    log.info(f"  🔧  redirect_uri (LH) limpia: {new_ru}")
-                    return urllib.parse.urlunparse((
-                        parsed.scheme, parsed.netloc, parsed.path, parsed.params,
-                        urllib.parse.urlencode(qp), parsed.fragment,
-                    ))
-
-                # Interceptar TODAS las peticiones a auth0/authorize (iframe + main frame)
-                _intercept_count = [0]
-
-                def _route_handler(route, request):
-                    try:
-                        _intercept_count[0] += 1
-                        log.info(
-                            f"  🔧  Interceptando auth0 #{_intercept_count[0]} "
-                            f"({request.resource_type}) — {request.url[:80]}..."
-                        )
-                        new_url = _clean_auth0_redirect_uri(request.url)
-                        if new_url != request.url:
-                            route.continue_(url=new_url)
-                        else:
-                            route.continue_()
-                    except Exception as _e:
-                        log.warning(f"  ⚠️  route handler error: {_e}")
-                        route.continue_()
-
-                ctx.route(_re.compile(r"auth0\.siteminder\.com/authorize"), _route_handler)
-
-                # Rastrear cadena completa de URLs de la ventana principal
-                url_chain: list[str] = []
-                page.on("framenavigated",
-                        lambda f: url_chain.append(f.url) if f == page.main_frame else None)
-
-                # 1. Navegar directamente a SiteMinder
+                # 1. Navegar directamente a SiteMinder con redirectUri=/authenticate
+                # (esta es la URL que LH tiene registrada en Auth0; usar /reservations
+                #  provoca "Callback URL mismatch")
                 redirect_uri = urllib.parse.quote(
-                    f"{LH_BASE_URL}/frontdesk/{LH_REGION}/{LH_PROPERTY_UUID}/reservations",
+                    f"{LH_BASE_URL}/frontdesk/{LH_REGION}/authenticate",
                     safe=""
                 )
                 siteminder_url = (
@@ -304,17 +254,11 @@ class LittleHotelierClient:
                 ).first.click()
                 log.info("  🖱️  Formulario enviado")
 
-                # 7. Esperar que la navegación se estabilice
-                try:
-                    page.wait_for_load_state("networkidle", timeout=20_000)
-                except Exception:
-                    pass
-                log.info(f"  🔗  URL tras networkidle: {page.url}")
-                log.info(f"  🔗  Cadena URLs: {' → '.join(url_chain[-8:])}")
-
-                # 8. Buscar lh_session_token en cookies durante 20 s
+                # 7. Esperar a que aparezca lh_session_token (callback /authenticate
+                #    establece la cookie tras procesar el OAuth)
+                log.info("  ⏳  Esperando cookie lh_session_token...")
                 token = None
-                deadline = time.time() + 20
+                deadline = time.time() + 45
                 while time.time() < deadline:
                     for c in ctx.cookies():
                         if c["name"] == "lh_session_token":
@@ -325,41 +269,10 @@ class LittleHotelierClient:
                         break
                     time.sleep(1)
 
-                # 9. Fallback: si seguimos en auth0 con userDeviceToken en la URL,
-                #    navegar directamente con la redirect_uri limpia
-                if not token and "auth0.siteminder.com/authorize" in page.url and "userDeviceToken" in page.url:
-                    log.info("  🔧  Fallback: navegando auth0 con redirect_uri limpia...")
-                    clean_url = _clean_auth0_redirect_uri(page.url)
-                    log.info(f"  🔧  URL limpia: {clean_url[:120]}...")
-                    try:
-                        page.goto(clean_url, wait_until="networkidle", timeout=30_000)
-                        log.info(f"  🔗  URL tras retry: {page.url}")
-                        deadline2 = time.time() + 20
-                        while time.time() < deadline2:
-                            for c in ctx.cookies():
-                                if c["name"] == "lh_session_token":
-                                    token = c["value"]
-                                    break
-                            if token:
-                                log.info(f"  ✅  Cookie detectada tras fallback")
-                                break
-                            time.sleep(1)
-                    except Exception as _e:
-                        log.warning(f"  ⚠️  Fallback navigate error: {_e}")
-
                 if not token:
                     log.error(f"❌  Timeout. URL final: {page.url}")
-                    # Diagnóstico de la página actual
                     try:
-                        title = page.title()
-                        body_text = page.locator("body").inner_text()[:400]
-                        log.info(f"  📄  Título: {title!r}")
-                        log.info(f"  📄  Texto: {body_text!r}")
-                    except Exception:
-                        pass
-                    try:
-                        all_cookie_names = [c["name"] for c in ctx.cookies()]
-                        log.info(f"  🍪  Todas las cookies: {all_cookie_names}")
+                        page.screenshot(path="login_timeout.png")
                     except Exception:
                         pass
                     browser.close()
