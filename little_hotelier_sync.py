@@ -645,10 +645,105 @@ def debug_mode():
 # ─────────────────────────────────────────────────────────────────
 # PUNTO DE ENTRADA
 # ─────────────────────────────────────────────────────────────────
+def manual_login_mode():
+    """Abre Chrome VISIBLE, espera a que el usuario inicie sesión manualmente
+    y guarda el nuevo lh_session_token en .env.
+
+    Uso cuando el token expira: el flujo OAuth con auth0 prompt=none no se
+    puede automatizar headless porque Auth0 valida la redirect_uri contra
+    una lista registrada que incluye parámetros dinámicos (userDeviceToken)
+    imposibles de replicar fuera del navegador real del usuario.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        log.error("❌  Playwright no instalado. Ejecuta: pip install playwright && python -m playwright install chromium")
+        return
+
+    print()
+    print("=" * 60)
+    print("🌐  MODO LOGIN MANUAL")
+    print("=" * 60)
+    print()
+    print("Se abrirá Chrome. Inicia sesión normalmente en Little Hotelier.")
+    print("Cuando veas tu panel de reservas, el script capturará la cookie")
+    print("y actualizará automáticamente el .env. (Tiempo máx: 5 minutos)")
+    print()
+    print("NO cierres la ventana hasta ver el mensaje de éxito.")
+    print()
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=False)
+        ctx     = browser.new_context()
+        page    = ctx.new_page()
+        page.goto(f"{LH_BASE_URL}/frontdesk/{LH_REGION}/{LH_PROPERTY_UUID}/reservations")
+
+        log.info("⏳  Esperando login (máx 5 min)...")
+        deadline = time.time() + 300
+        token = None
+        while time.time() < deadline:
+            for c in ctx.cookies():
+                if c["name"] == "lh_session_token":
+                    token_candidate = c["value"]
+                    if (page.url.startswith(LH_BASE_URL)
+                            and "reservations" in page.url
+                            and "authx.siteminder.com" not in page.url
+                            and "auth0.siteminder.com" not in page.url):
+                        token = token_candidate
+                        break
+            if token:
+                break
+            time.sleep(2)
+
+        if token:
+            # Guardar token en .env
+            try:
+                if os.path.exists(ENV_PATH):
+                    with open(ENV_PATH, "r", encoding="utf-8") as f:
+                        lines = f.readlines()
+                    found = False
+                    for i, line in enumerate(lines):
+                        if line.startswith("LH_SESSION_TOKEN="):
+                            lines[i] = f"LH_SESSION_TOKEN={token}\n"
+                            found = True
+                            break
+                    if not found:
+                        lines.append(f"LH_SESSION_TOKEN={token}\n")
+                    with open(ENV_PATH, "w", encoding="utf-8") as f:
+                        f.writelines(lines)
+                else:
+                    with open(ENV_PATH, "w", encoding="utf-8") as f:
+                        f.write(f"LH_SESSION_TOKEN={token}\n")
+                print()
+                print("=" * 60)
+                print("✅  TOKEN GUARDADO en .env")
+                print("=" * 60)
+                print(f"\n    LH_SESSION_TOKEN={token[:30]}...\n")
+                print("Ya puedes ejecutar normalmente:")
+                print("    python little_hotelier_sync.py")
+                print()
+                print("Para Render: copia este valor completo y actualízalo")
+                print("en Environment → LH_SESSION_TOKEN del cron job.")
+                print()
+                print(f"Valor completo: {token}")
+                print()
+            except Exception as e:
+                log.error(f"❌  Error guardando token: {e}")
+                print(f"\nToken capturado (cópialo manualmente):\n{token}\n")
+        else:
+            print()
+            print("❌  No se detectó login completado tras 5 minutos.")
+            print("    ¿Llegaste a ver la página de reservas?")
+
+        browser.close()
+
+
 if __name__ == "__main__":
     import sys
 
-    if "--list" in sys.argv:
+    if "--login" in sys.argv:
+        manual_login_mode()
+    elif "--list" in sys.argv:
         list_mode()
     elif "--debug" in sys.argv:
         debug_mode()
