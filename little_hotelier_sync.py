@@ -204,26 +204,25 @@ class LittleHotelierClient:
                 import re as _re
 
                 def _clean_auth0_redirect_uri(url: str) -> str:
-                    """Elimina TODOS los query params de redirect_uri en una URL de auth0.
-
-                    Auth0 tiene registrado el callback SIN query params.
-                    LH añade ?userDeviceToken=... y ?tenantCode=... dinámicamente,
-                    lo que provoca "Callback URL mismatch".
+                    """Elimina query params de redirect_uri SOLO cuando apunta a
+                    platform.littlehotelier.com (no tocar redirects internos de SiteMinder).
                     """
                     parsed = urllib.parse.urlparse(url)
                     qp     = dict(urllib.parse.parse_qsl(parsed.query))
                     ru_raw = qp.get("redirect_uri", "")
                     if not ru_raw:
                         return url
+                    # Solo modificar redirect_uri que apunten a platform.littlehotelier.com
+                    if "platform.littlehotelier.com" not in ru_raw:
+                        return url
                     ru = urllib.parse.urlparse(ru_raw)
-                    # Callback limpio: solo scheme + host + path, sin query params
                     new_ru = urllib.parse.urlunparse((
                         ru.scheme, ru.netloc, ru.path, "", "", "",
                     ))
                     if new_ru == ru_raw:
                         return url  # ya está limpio
                     qp["redirect_uri"] = new_ru
-                    log.info(f"  🔧  redirect_uri limpia: {new_ru}")
+                    log.info(f"  🔧  redirect_uri (LH) limpia: {new_ru}")
                     return urllib.parse.urlunparse((
                         parsed.scheme, parsed.netloc, parsed.path, parsed.params,
                         urllib.parse.urlencode(qp), parsed.fragment,
