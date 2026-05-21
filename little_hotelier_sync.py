@@ -539,7 +539,7 @@ def debug_mode():
     log.info("🛠️   MODO DEBUG")
     today     = datetime.today()
     date_from = (today - timedelta(days=DAYS_BACK)).strftime("%Y-%m-%d")
-    date_to   = (today + timedelta(days=7)).strftime("%Y-%m-%d")
+    date_to   = (today + timedelta(days=DAYS_AHEAD)).strftime("%Y-%m-%d")
 
     lh = LittleHotelierClient()
     reservations = lh.get_reservations(date_from, date_to)
