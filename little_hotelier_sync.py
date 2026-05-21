@@ -254,8 +254,20 @@ class LittleHotelierClient:
                 ).first.click()
                 log.info("  🖱️  Formulario enviado")
 
-                # 7. Esperar a que aparezca lh_session_token (callback /authenticate
-                #    establece la cookie tras procesar el OAuth)
+                # Listener para diagnosticar respuestas HTTP de LH
+                def _log_lh_response(response):
+                    try:
+                        if "platform.littlehotelier.com" in response.url:
+                            sc = response.headers.get("set-cookie", "")
+                            log.info(
+                                f"  📡  LH HTTP {response.status} {response.url[:100]} "
+                                f"set-cookie={'sí' if sc else 'no'}"
+                            )
+                    except Exception:
+                        pass
+                page.on("response", _log_lh_response)
+
+                # 7. Esperar a que aparezca lh_session_token
                 log.info("  ⏳  Esperando cookie lh_session_token...")
                 token = None
                 deadline = time.time() + 45
@@ -272,7 +284,15 @@ class LittleHotelierClient:
                 if not token:
                     log.error(f"❌  Timeout. URL final: {page.url}")
                     try:
-                        page.screenshot(path="login_timeout.png")
+                        title = page.title()
+                        body = page.locator("body").inner_text()[:300]
+                        log.info(f"  📄  Título: {title!r}")
+                        log.info(f"  📄  Cuerpo: {body!r}")
+                    except Exception:
+                        pass
+                    try:
+                        cookie_names = [c["name"] for c in ctx.cookies()]
+                        log.info(f"  🍪  Cookies presentes: {cookie_names}")
                     except Exception:
                         pass
                     browser.close()
