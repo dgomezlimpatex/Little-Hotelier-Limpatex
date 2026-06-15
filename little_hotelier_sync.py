@@ -49,6 +49,10 @@ LH_PROPERTY_UUID = os.getenv("LH_PROPERTY_UUID", "8d0c221e-3a40-4eda-8c15-deb245
 LH_REGION        = os.getenv("LH_REGION", "emea")
 LH_BASE_URL      = "https://platform.littlehotelier.com"
 ENV_PATH         = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+COOKIE_JAR_PATH  = os.getenv(
+    "LH_COOKIES_PATH",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "lh_cookies.json"),
+)
 
 APP_URL     = os.getenv("APP_URL", "https://gestionlimpatex.vercel.app")
 APP_API_KEY = os.getenv("APP_API_KEY", "")
@@ -95,11 +99,69 @@ class LittleHotelierClient:
             "Accept-Language": "es-ES,es;q=0.9",
             "Referer":         LH_BASE_URL,
         })
+        self._load_cookie_jar()
         if LH_SESSION_TOKEN:
             self.session.cookies.set(
                 "lh_session_token", LH_SESSION_TOKEN,
                 domain="platform.littlehotelier.com"
             )
+
+    def _load_cookie_jar(self) -> int:
+        """Carga cookies guardadas por el login manual, si existen."""
+        try:
+            cookies_json = os.getenv("LH_COOKIES_JSON", "").strip()
+            if cookies_json:
+                cookies = json.loads(cookies_json)
+            else:
+                if not os.path.exists(COOKIE_JAR_PATH):
+                    return 0
+                with open(COOKIE_JAR_PATH, "r", encoding="utf-8") as f:
+                    cookies = json.load(f)
+        except Exception as e:
+            log.warning(f"⚠️  No se pudieron leer las cookies de sesión: {e}")
+            return 0
+
+        loaded = 0
+        for cookie in cookies:
+            name = cookie.get("name")
+            value = cookie.get("value")
+            domain = (cookie.get("domain") or "platform.littlehotelier.com").lstrip(".")
+            path = cookie.get("path") or "/"
+            if not name or value is None:
+                continue
+            if not any(host in domain for host in ("littlehotelier.com", "siteminder.com")):
+                continue
+            self.session.cookies.set(name, value, domain=domain, path=path)
+            loaded += 1
+        if loaded:
+            log.info(f"🍪  Cookies de sesión cargadas: {loaded}")
+        return loaded
+
+    def _save_cookie_jar(self, cookies: list[dict]) -> int:
+        """Guarda cookies útiles de Playwright para reutilizarlas con requests."""
+        useful = []
+        for cookie in cookies:
+            domain = (cookie.get("domain") or "").lstrip(".")
+            if not any(host in domain for host in ("littlehotelier.com", "siteminder.com")):
+                continue
+            useful.append({
+                "name": cookie.get("name"),
+                "value": cookie.get("value"),
+                "domain": domain,
+                "path": cookie.get("path") or "/",
+                "expires": cookie.get("expires"),
+                "httpOnly": cookie.get("httpOnly"),
+                "secure": cookie.get("secure"),
+                "sameSite": cookie.get("sameSite"),
+            })
+
+        if not useful:
+            return 0
+
+        with open(COOKIE_JAR_PATH, "w", encoding="utf-8") as f:
+            json.dump(useful, f, ensure_ascii=False, indent=2)
+        log.info(f"💾  Cookies guardadas en {COOKIE_JAR_PATH} ({len(useful)})")
+        return len(useful)
 
     def get_reservations(self, date_from: str, date_to: str) -> list[dict]:
         """
@@ -314,6 +376,7 @@ class LittleHotelierClient:
                     domain = c.get("domain", "").lstrip(".")
                     if "littlehotelier.com" in domain:
                         self.session.cookies.set(c["name"], c["value"], domain=domain)
+                self._save_cookie_jar(all_cookies)
 
                 browser.close()
                 self._save_token_to_env(token)
@@ -366,6 +429,37 @@ def _parse_html(html: str) -> list[dict]:
     return reservations
 
 
+def _extract_rooms(room_td) -> list[str]:
+    """Extrae una lista real de habitaciones aunque Little Hotelier las apile."""
+    if not room_td:
+        return []
+
+    raw_rooms = room_td.get_text("\n", strip=True)
+    rooms = []
+    for line in raw_rooms.splitlines():
+        room = re.sub(r"\(\+\s*\d+\s*M[aá]s\)", "", line, flags=re.IGNORECASE).strip()
+        if room and room != "-" and room not in rooms:
+            rooms.append(room)
+
+    if len(rooms) > 1:
+        return rooms
+
+    # Fallback para HTML/strings antiguos donde quedaron pegadas:
+    # "Habitación 6Habitación 1(+1 Más)" -> ["Habitación 6", "Habitación 1"].
+    raw_compact = re.sub(r"\(\+\s*\d+\s*M[aá]s\)", "", raw_rooms, flags=re.IGNORECASE)
+    matches = re.findall(
+        r"Habitaci[oó]n(?:\s+doble\s+sin\s+vistas)?\s+.*?(?=Habitaci[oó]n(?:\s+doble\s+sin\s+vistas)?\s+|$)",
+        raw_compact,
+        flags=re.IGNORECASE,
+    )
+    fallback_rooms = []
+    for match in matches:
+        room = match.strip()
+        if room and room not in fallback_rooms:
+            fallback_rooms.append(room)
+    return fallback_rooms or rooms
+
+
 def _parse_row(row) -> dict:
     # Estado  (clase CSS en inglés: confirmed, cancelled, etc.)
     status_span = row.select_one("td.status span")
@@ -409,8 +503,7 @@ def _parse_row(row) -> dict:
 
     # Habitación (array para compatibilidad con el schema de Lovable)
     room_td   = row.select_one("td.room_name")
-    room_name = room_td.get_text(strip=True) if room_td else ""
-    rooms     = [room_name] if room_name else []
+    rooms     = _extract_rooms(room_td)
 
     # Total
     total_td = row.select_one("td.total")
@@ -638,6 +731,9 @@ def manual_login_mode():
             time.sleep(2)
 
         if token:
+            all_cookies = ctx.cookies()
+            cookie_client = LittleHotelierClient()
+            cookie_client._save_cookie_jar(all_cookies)
             # Guardar token en .env
             try:
                 if os.path.exists(ENV_PATH):
@@ -661,11 +757,13 @@ def manual_login_mode():
                 print("✅  TOKEN GUARDADO en .env")
                 print("=" * 60)
                 print(f"\n    LH_SESSION_TOKEN={token[:30]}...\n")
+                print(f"    Cookies completas guardadas en: {COOKIE_JAR_PATH}")
+                print()
                 print("Ya puedes ejecutar normalmente:")
                 print("    python little_hotelier_sync.py")
                 print()
-                print("Para Render: copia este valor completo y actualízalo")
-                print("en Environment → LH_SESSION_TOKEN del cron job.")
+                print("Para Render: además del token, puedes copiar el contenido")
+                print("de lh_cookies.json en Environment → LH_COOKIES_JSON.")
                 print()
                 print(f"Valor completo: {token}")
                 print()
