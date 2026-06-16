@@ -2,4 +2,4 @@ requests
 python-dotenv
 beautifulsoup4
 lxml
-playwright
+playwright==1.60.0

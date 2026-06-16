@@ -121,6 +121,7 @@ class LittleHotelierClient:
                 cookies = json.loads(cookies_json)
         except Exception as e:
             log.warning(f"⚠️  No se pudieron leer las cookies de sesión: {e}")
+            log.warning("⚠️  Revisa LH_COOKIES_JSON: debe ser el JSON completo de lh_cookies.json, empezando por '[' y terminando por ']'.")
             return 0
 
         loaded = 0
