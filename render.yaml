@@ -1,0 +1,43 @@
+services:
+  - type: worker
+    name: little-hotelier-limpatex-worker
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    branch: main
+    autoDeploy: true
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    disk:
+      name: lh-session-data
+      mountPath: /data
+      sizeGB: 5
+    envVars:
+      - key: LH_REGION
+        value: emea
+      - key: LH_COOKIES_PATH
+        value: /data/lh_cookies.json
+      - key: LH_BROWSER_PROFILE_DIR
+        value: /data/browser-profile
+      - key: LH_HEADLESS
+        value: "1"
+      - key: DAYS_BACK
+        value: "7"
+      - key: DAYS_AHEAD
+        value: "30"
+      - key: LOOP_INTERVAL
+        value: "3600"
+      - key: LH_PROPERTY_UUID
+        sync: false
+      - key: LH_EMAIL
+        sync: false
+      - key: LH_PASSWORD
+        sync: false
+      - key: LH_SESSION_TOKEN
+        sync: false
+      - key: LH_COOKIES_JSON
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: APP_API_KEY
+        sync: false

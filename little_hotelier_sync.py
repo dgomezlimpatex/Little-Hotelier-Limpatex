@@ -53,13 +53,15 @@ COOKIE_JAR_PATH  = os.getenv(
     "LH_COOKIES_PATH",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "lh_cookies.json"),
 )
+LH_BROWSER_PROFILE_DIR = os.getenv("LH_BROWSER_PROFILE_DIR", "").strip()
+LH_HEADLESS = os.getenv("LH_HEADLESS", "1").strip().lower() not in ("0", "false", "no")
 
 APP_URL     = os.getenv("APP_URL", "https://gestionlimpatex.vercel.app")
 APP_API_KEY = os.getenv("APP_API_KEY", "")
 
-DAYS_BACK      = 7      # días hacia atrás (reservas ya alojadas)
-DAYS_AHEAD     = 30     # días hacia adelante
-LOOP_INTERVAL  = 3600   # segundos
+DAYS_BACK      = int(os.getenv("DAYS_BACK", "7"))       # dias hacia atras
+DAYS_AHEAD     = int(os.getenv("DAYS_AHEAD", "30"))     # dias hacia adelante
+LOOP_INTERVAL  = int(os.getenv("LOOP_INTERVAL", "3600"))  # segundos
 
 # ─────────────────────────────────────────────────────────────────
 # LOGGING
@@ -109,14 +111,14 @@ class LittleHotelierClient:
     def _load_cookie_jar(self) -> int:
         """Carga cookies guardadas por el login manual, si existen."""
         try:
-            cookies_json = os.getenv("LH_COOKIES_JSON", "").strip()
-            if cookies_json:
-                cookies = json.loads(cookies_json)
-            else:
-                if not os.path.exists(COOKIE_JAR_PATH):
-                    return 0
+            if os.path.exists(COOKIE_JAR_PATH):
                 with open(COOKIE_JAR_PATH, "r", encoding="utf-8") as f:
                     cookies = json.load(f)
+            else:
+                cookies_json = os.getenv("LH_COOKIES_JSON", "").strip()
+                if not cookies_json:
+                    return 0
+                cookies = json.loads(cookies_json)
         except Exception as e:
             log.warning(f"⚠️  No se pudieron leer las cookies de sesión: {e}")
             return 0
@@ -158,6 +160,9 @@ class LittleHotelierClient:
         if not useful:
             return 0
 
+        cookie_dir = os.path.dirname(COOKIE_JAR_PATH)
+        if cookie_dir:
+            os.makedirs(cookie_dir, exist_ok=True)
         with open(COOKIE_JAR_PATH, "w", encoding="utf-8") as f:
             json.dump(useful, f, ensure_ascii=False, indent=2)
         log.info(f"💾  Cookies guardadas en {COOKIE_JAR_PATH} ({len(useful)})")
@@ -250,25 +255,35 @@ class LittleHotelierClient:
 
         try:
             with sync_playwright() as pw:
-                browser = pw.chromium.launch(
-                    headless=True,
-                    args=[
-                        "--disable-blink-features=AutomationControlled",
-                        "--no-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-gpu",
-                    ],
-                )
-                ctx = browser.new_context(
-                    user_agent=(
+                browser = None
+                launch_args = [
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                ]
+                context_options = {
+                    "user_agent": (
                         "Mozilla/5.0 (X11; Linux x86_64) "
                         "AppleWebKit/537.36 (KHTML, like Gecko) "
                         "Chrome/124.0.0.0 Safari/537.36"
                     ),
-                    extra_http_headers={
+                    "extra_http_headers": {
                         "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
                     },
-                )
+                }
+                if LH_BROWSER_PROFILE_DIR:
+                    os.makedirs(LH_BROWSER_PROFILE_DIR, exist_ok=True)
+                    log.info(f"Browser profile persistente: {LH_BROWSER_PROFILE_DIR}")
+                    ctx = pw.chromium.launch_persistent_context(
+                        LH_BROWSER_PROFILE_DIR,
+                        headless=LH_HEADLESS,
+                        args=launch_args,
+                        **context_options,
+                    )
+                else:
+                    browser = pw.chromium.launch(headless=LH_HEADLESS, args=launch_args)
+                    ctx = browser.new_context(**context_options)
                 page = ctx.new_page()
 
                 import urllib.parse
@@ -366,7 +381,9 @@ class LittleHotelierClient:
                         log.info(f"  🍪  Cookies presentes: {cookie_names}")
                     except Exception:
                         pass
-                    browser.close()
+                    ctx.close()
+                    if browser:
+                        browser.close()
                     return False
 
                 # 8. Copiar TODAS las cookies de LH al requests session
@@ -378,7 +395,9 @@ class LittleHotelierClient:
                         self.session.cookies.set(c["name"], c["value"], domain=domain)
                 self._save_cookie_jar(all_cookies)
 
-                browser.close()
+                ctx.close()
+                if browser:
+                    browser.close()
                 self._save_token_to_env(token)
                 log.info("✅  Sesión renovada — todas las cookies copiadas al cliente")
                 return True

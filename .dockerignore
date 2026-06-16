@@ -1,0 +1,12 @@
+.git
+.env
+lh_cookies.json
+reservas_cache.json
+sync_log.txt
+sync_run.log
+*.log
+__pycache__/
+*.pyc
+venv/
+browsers/
+siteminder_debug.html
