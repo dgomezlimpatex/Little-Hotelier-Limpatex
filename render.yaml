@@ -19,14 +19,36 @@ services:
         value: /data/lh_cookies.json
       - key: LH_BROWSER_PROFILE_DIR
         value: /data/browser-profile
+      - key: LH_STATE_PATH
+        value: /data/lh_sync_state.json
+      - key: LH_DEBUG_DIR
+        value: /data/debug
       - key: LH_HEADLESS
         value: "1"
+      - key: DISABLE_AUTO_LOGIN
+        value: "0"
       - key: DAYS_BACK
         value: "7"
       - key: DAYS_AHEAD
         value: "30"
-      - key: LOOP_INTERVAL
-        value: "3600"
+      - key: RUN_TIMEZONE
+        value: Europe/Madrid
+      - key: RUN_AT_HOURS
+        value: "09:00,14:00,20:00"
+      - key: RUN_ON_START
+        value: "0"
+      - key: SCHEDULER_POLL_SECONDS
+        value: "60"
+      - key: ALERT_EMAIL_TO
+        value: dgomezlimpatex@gmail.com
+      - key: ALERT_COOLDOWN_MINUTES
+        value: "180"
+      - key: ALERT_ON_ZERO_RESERVATIONS
+        value: "0"
+      - key: LH_SECRET_STORE_ENABLED
+        value: "0"
+      - key: SUPABASE_STATE_TABLE
+        value: private_lh_integration_state
       - key: LH_PROPERTY_UUID
         sync: false
       - key: LH_EMAIL
@@ -40,4 +62,20 @@ services:
       - key: APP_URL
         sync: false
       - key: APP_API_KEY
+        sync: false
+      - key: ALERT_EMAIL_FROM
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false

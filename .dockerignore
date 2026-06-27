@@ -10,3 +10,8 @@ __pycache__/
 venv/
 browsers/
 siteminder_debug.html
+.hermes/
+.pytest_cache/
+tests/
+docs/
+RUNBOOK.md

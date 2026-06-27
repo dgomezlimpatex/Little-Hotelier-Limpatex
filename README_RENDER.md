@@ -1,69 +1,130 @@
 # Little Hotelier en Render
 
-Este repositorio puede ejecutarse en Render como un worker continuo para sincronizar reservas de Little Hotelier sin depender de tu ordenador.
+Este repositorio ejecuta la sincronización Little Hotelier → Limpatex en Render como **worker Docker con disco persistente**.
 
-## Por que es un worker y no un cron
+## Por qué worker y no cron puro
 
-Little Hotelier no esta funcionando como una API estable con token fijo. El sincronizador depende de cookies de sesion y, cuando caducan, intenta renovar la sesion con navegador automatizado.
+Little Hotelier/SiteMinder no expone una API estable con token fijo para este flujo. El scraper depende de cookies de sesión y a veces necesita Playwright para renovar login.
 
-Render Cron Jobs no permite discos persistentes. Para conservar cookies y perfil de navegador entre ejecuciones necesitamos un worker con disco.
+Render Cron Jobs no es ideal para esto porque no conserva bien perfil/cookies entre ejecuciones. El worker usa disco persistente:
 
-## Que hace
+- `/data/lh_cookies.json`
+- `/data/browser-profile`
+- `/data/lh_sync_state.json`
+- `/data/debug`
+
+## Qué hace ahora
 
 - Ejecuta `python little_hotelier_sync.py --loop`.
-- Sincroniza cada `LOOP_INTERVAL` segundos.
-- Guarda cookies en `/data/lh_cookies.json`.
-- Guarda perfil persistente de navegador en `/data/browser-profile`.
-- Si las cookies siguen vivas, sincroniza sin login.
-- Si caducan, intenta login automatico con `LH_EMAIL` y `LH_PASSWORD`.
+- Comprueba cada `SCHEDULER_POLL_SECONDS` segundos si toca sincronizar.
+- Sincroniza a las `RUN_AT_HOURS` en `RUN_TIMEZONE`, por defecto `09:00,14:00,20:00` en `Europe/Madrid`.
+- Usa cookies existentes si siguen vivas.
+- Si la sesión caduca, intenta auto-login con `LH_EMAIL` y `LH_PASSWORD`.
+- Si auto-login funciona, guarda cookies/token en disco y, opcionalmente, en Supabase.
+- Si falla, guarda estado y envía alerta por email si está configurado.
 
-## Variables de entorno
+## Variables obligatorias en Render
 
-Estas variables se configuran en Render. No deben subirse al repositorio.
-
-Obligatorias:
+Configúralas como secretas en el dashboard de Render:
 
 - `LH_PROPERTY_UUID`
 - `LH_EMAIL`
 - `LH_PASSWORD`
-- `LH_SESSION_TOKEN`
-- `LH_COOKIES_JSON`
+- `LH_SESSION_TOKEN` inicial, si existe
+- `LH_COOKIES_JSON` inicial, pegando el contenido completo de `lh_cookies.json`
 - `APP_URL`
 - `APP_API_KEY`
 
-Configuradas por el Blueprint:
+## Variables recomendadas para alertas
 
-- `LH_REGION=emea`
-- `LH_COOKIES_PATH=/data/lh_cookies.json`
-- `LH_BROWSER_PROFILE_DIR=/data/browser-profile`
-- `LH_HEADLESS=1`
-- `DAYS_BACK=7`
-- `DAYS_AHEAD=30`
-- `LOOP_INTERVAL=3600`
+Opción Resend:
+
+- `ALERT_EMAIL_FROM=alertas@limpatex.com`
+- `RESEND_API_KEY`
+
+Opción SMTP:
+
+- `ALERT_EMAIL_FROM`
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USER`
+- `SMTP_PASSWORD`
+- `SMTP_USE_TLS=1`
+
+`ALERT_EMAIL_TO` ya queda en `render.yaml` como `dgomezlimpatex@gmail.com`.
+
+## Supabase como backup de cookies/estado
+
+Opcional, recomendado cuando quieras evitar tocar variables de Render tras cada login manual.
+
+1. Ejecuta `docs/supabase-lh-state.sql` en Supabase SQL Editor.
+2. En Render configura:
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `LH_SECRET_STORE_ENABLED=1`
+3. Localmente, cuando tengas que renovar manualmente:
+
+```bash
+python little_hotelier_sync.py --login --push-cookies
+```
+
+Eso guardará cookies/token localmente y también en Supabase.
 
 ## Primer despliegue
 
-1. Sube este repo a GitHub.
-2. En Render, crea un Blueprint desde el repositorio.
-3. Render leera `render.yaml` y creara `little-hotelier-limpatex-worker`.
-4. Rellena las variables marcadas como secretas.
-5. En `LH_COOKIES_JSON`, pega el contenido completo de `lh_cookies.json`.
-6. Aplica el Blueprint y revisa los logs.
+1. Sube el repo a GitHub.
+2. En Render crea/actualiza el Blueprint desde `render.yaml`.
+3. Rellena variables secretas.
+4. Ejecuta localmente si aún no tienes cookies:
 
-## Si el login automatico falla
+```bash
+python little_hotelier_sync.py --login
+```
 
-Puede ocurrir si SiteMinder/Little Hotelier bloquea el login desde un navegador headless en la nube.
+5. Copia el contenido completo de `lh_cookies.json` en `LH_COOKIES_JSON` de Render.
+6. Para smoke test temporal, pon `RUN_ON_START=1`, reinicia/deploya y revisa logs.
+7. Si sincroniza correctamente, vuelve a `RUN_ON_START=0`.
+
+## Comandos útiles
+
+```bash
+python little_hotelier_sync.py --validate-config
+python little_hotelier_sync.py --status
+python little_hotelier_sync.py --debug
+python little_hotelier_sync.py --list --days 30
+python little_hotelier_sync.py --test-alert
+python little_hotelier_sync.py --login
+python little_hotelier_sync.py --login --push-cookies
+```
+
+## Si el login automático falla
+
+Puede ocurrir si SiteMinder pide captcha/2FA o bloquea IPs de datacenter.
 
 Plan B operativo:
 
-1. Ejecuta localmente:
-   `python little_hotelier_sync.py --login`
-2. Copia el nuevo `LH_SESSION_TOKEN` a Render.
-3. Copia el contenido actualizado de `lh_cookies.json` a `LH_COOKIES_JSON`.
-4. Redeploy o reinicia el worker.
+1. Ejecuta en local:
 
-El objetivo es que esto sea excepcional. Mientras Little Hotelier mantenga vivas las cookies, Render sincronizara solo.
+```bash
+python little_hotelier_sync.py --login
+```
 
-## Coste estimado
+2. Si Supabase store está activo:
 
-Este enfoque requiere un worker de pago y un disco pequeno en Render. El plan `starter` suele ser suficiente para esta primera version.
+```bash
+python little_hotelier_sync.py --login --push-cookies
+```
+
+3. Si Supabase store no está activo, copia `LH_SESSION_TOKEN` y el contenido completo de `lh_cookies.json` a Render.
+
+## Verificación técnica
+
+```bash
+python -m py_compile little_hotelier_sync.py
+python -m pytest -q
+python little_hotelier_sync.py --validate-config
+```
+
+## Nota de Playwright
+
+El Dockerfile usa `mcr.microsoft.com/playwright/python:v1.60.0-jammy` y `requirements.txt` fija `playwright==1.60.0`. Mantén ambas versiones alineadas.

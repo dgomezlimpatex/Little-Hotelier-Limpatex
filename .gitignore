@@ -7,3 +7,6 @@ reservas_cache.json
 siteminder_debug.html
 venv/
 browsers/
+.pytest_cache/
+/data/
+debug/
