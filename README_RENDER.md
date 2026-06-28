@@ -35,6 +35,14 @@ Configúralas como secretas en el dashboard de Render:
 - `APP_URL`
 - `APP_API_KEY`
 
+Tu captura muestra que ya usabas una Supabase Edge Function:
+
+```env
+APP_URL=https://qyipyygojlfhdghnraus.supabase.co/functions/v1/little-hotelier-sync
+```
+
+Ese valor es correcto si esa función es la que recibe/upserta reservas. El script ahora detecta si `APP_URL` ya es un endpoint completo `/functions/v1/...` y lo usa tal cual. Solo añade `/api/reservations` cuando `APP_URL` es una base tipo `https://gestionlimpatex.vercel.app`.
+
 ## Variables recomendadas para alertas
 
 Opción Resend:

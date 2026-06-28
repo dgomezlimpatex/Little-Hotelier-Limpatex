@@ -884,21 +884,31 @@ def _fmt_display(date_iso: str) -> str:
 # ─────────────────────────────────────────────────────────────────
 class LimpatexAppClient:
     """
-    Envía reservas a gestionlimpatex.vercel.app.
+    Envía reservas al endpoint configurado.
 
-    El endpoint esperado es:  POST /api/reservations
-    Ver sección final de este archivo para saber qué añadir en tu app.
+    APP_URL puede ser:
+    - dominio/base de la app: https://gestionlimpatex.vercel.app
+      → se envía a /api/reservations
+    - endpoint completo: https://...supabase.co/functions/v1/little-hotelier-sync
+      → se usa tal cual, sin añadir /api/reservations
     """
 
     def __init__(self):
         self.base = APP_URL.rstrip("/")
+        self.endpoint_url = self._resolve_endpoint_url(self.base)
         self.sess = requests.Session()
         self.sess.headers["Content-Type"] = "application/json"
         if APP_API_KEY:
             self.sess.headers["Authorization"] = f"Bearer {APP_API_KEY}"
 
+    @staticmethod
+    def _resolve_endpoint_url(app_url: str) -> str:
+        if "/functions/v1/" in app_url or app_url.rstrip("/").endswith("/api/reservations"):
+            return app_url.rstrip("/")
+        return f"{app_url.rstrip('/')}/api/reservations"
+
     def upsert(self, reservation: dict) -> bool:
-        url = f"{self.base}/api/reservations"
+        url = self.endpoint_url
         try:
             resp = self.sess.post(url, json=reservation, timeout=15)
             if resp.status_code in (200, 201):

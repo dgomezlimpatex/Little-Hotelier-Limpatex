@@ -72,3 +72,19 @@ def test_fetch_result_can_represent_auto_login_failure():
     assert result.status == lhs.SyncStatus.AUTO_LOGIN_FAILED
     assert result.reservations == []
     assert "login" in result.message
+
+
+def test_app_url_full_supabase_function_is_used_without_appending_api_reservations(monkeypatch):
+    monkeypatch.setattr(lhs, "APP_URL", "https://example.supabase.co/functions/v1/little-hotelier-sync")
+
+    client = lhs.LimpatexAppClient()
+
+    assert client.endpoint_url == "https://example.supabase.co/functions/v1/little-hotelier-sync"
+
+
+def test_app_url_base_domain_appends_api_reservations(monkeypatch):
+    monkeypatch.setattr(lhs, "APP_URL", "https://gestionlimpatex.vercel.app")
+
+    client = lhs.LimpatexAppClient()
+
+    assert client.endpoint_url == "https://gestionlimpatex.vercel.app/api/reservations"
